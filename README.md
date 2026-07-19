@@ -87,23 +87,34 @@ on-the-fly reprojection — the plugin reads the file, not the canvas.
 Vector overlays may be in any CRS: they are reprojected to the DEM CRS
 and clipped to its extent automatically.
 
+### Scene selection
+
+The plugin performs best in regions with mountainous or strongly
+dissected terrain expressed at a regional scale. Weakly dissected
+lowland areas may produce less convincing results. For a more balanced
+composition, select scenes with lowland terrain in the foreground or use
+view rotation to bring the plains forward.
+
 ### Resolution
 
-**Aim for about 6000 px on the longer side of the DEM.** This is the
+**Aim for about 6,000 px on the longer side of the DEM.** This is the
 sweet spot where the engraving reads as line work rather than as noise
 or as coarse scribble:
 
-- Below ~2000 px the strokes become sparse and the framework blocky.
-- Around 6000 px you get a dense, even texture that prints beautifully
-  at A2–A1 and still renders in a few minutes.
-- Above ~12000 px the gain is marginal, while memory and time grow
+- Below ~2,000 px the strokes become sparse and the framework blocky.
+- Around 6,000 px, you get a dense, even texture that prints beautifully
+  at A2–A1 sizes and still renders in a few minutes. The progress bar may
+  appear to freeze at 40–50%; this is normal.
+- Above ~12,000 px the gain is marginal, while memory and time grow
   quadratically. Use strip mode (see below) if you go there anyway.
 
 The **landform algorithm** resamples internally to *Working resolution*
-(default 2000 px) — raise it to 3000–4000 px for a final sheet. The
-**classic algorithm** always works at full DEM resolution, so prepare
-the DEM itself at the target size: resample it beforehand rather than
-feeding a 30000 px raster.
+(default 2,000 px) — raise it to 3,000–4,000 px for a final sheet. The
+**Classic algorithm** always works at full DEM resolution, so prepare
+the DEM at the intended output size: resample it beforehand rather than
+feeding it a 30,000 px raster. Without strip tiling (see below), very
+large scenes may take several hours to render and can exhaust available
+RAM.
 
 Match the DEM resolution to the sheet, not to the source data: a
 1-arcsecond SRTM tile of a whole country is far more detail than a
@@ -134,6 +145,11 @@ it acts as a multiplier on the target, and the default 2.2 doubles it.
 Add **Relative slopes** if the line work is still sparse: stroke cutoff
 and weight come from scene percentiles instead of fixed 4°/45°. The
 trade-off is that stroke weight is no longer comparable between sheets.
+
+> **Warning:** Relative Slope and Scale Mode are highly experimental.
+> This option is being developed primarily for small, large-scale scenes.
+> It may produce highly unpredictable results, often bearing little
+> resemblance to the appearance you intended.
 
 ### Vertical exaggeration and view
 
