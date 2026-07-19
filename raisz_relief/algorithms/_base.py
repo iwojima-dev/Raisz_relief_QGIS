@@ -61,6 +61,11 @@ class ReliefAlgorithmBase(QgsProcessingAlgorithm):
     LC_SCRUB = "LC_SCRUB"; LC_GRASS = "LC_GRASS"
     PAPER_PRESET = "PAPER_PRESET"
     AUTO_SEA = "AUTO_SEA"; SEA_LEVEL = "SEA_LEVEL"
+    NODATA_MODE = "NODATA_MODE"
+    NODATA_MODES = ["Plain (fill with nearest elevations)",
+                    "Sea (flood at sea level)",
+                    "Paper (do not draw -- clean sheet)"]
+    NODATA_KEYS = ["plain", "sea", "paper"]
     HAND_JITTER = "HAND_JITTER"
     SHEET_FRAME = "SHEET_FRAME"
     SHEET_TICKS = "SHEET_TICKS"
@@ -259,6 +264,18 @@ class ReliefAlgorithmBase(QgsProcessingAlgorithm):
             self.SEA_LEVEL, self.tr("Sea level, m (for auto-sea)"),
             QgsProcessingParameterNumber.Double, 0.0),
             "Elevation threshold of the auto-sea."))
+        self.addParameter(self._h(QgsProcessingParameterEnum(
+            self.NODATA_MODE,
+            self.tr("Areas without data (nodata) shown as"),
+            options=self.NODATA_MODES, defaultValue=0),
+            "What to do where the DEM has no data. 'Plain' fills with the "
+            "nearest elevations (the default and the old behaviour), which "
+            "reads as a flat plain. 'Sea' floods the gap at sea level and "
+            "adds it to the sea polygons. 'Paper' leaves it undrawn: no "
+            "fill, no strokes, no framework -- a clean sheet, as on maps "
+            "where the survey did not cover a corner. In every mode the "
+            "nodata border counts as an artificial edge, so no coastal "
+            "vignette is drawn along it."))
         self.addParameter(self._h(QgsProcessingParameterBoolean(
             self.WATER_PATTERNS,
             self.tr("Hydrography patterns (coastal vignette, lake hatch, marsh tufts)"),
@@ -367,6 +384,8 @@ class ReliefAlgorithmBase(QgsProcessingAlgorithm):
             bg=paper, ink=ink,
             auto_sea=self.parameterAsBool(parameters, self.AUTO_SEA, context),
             sea_level=self.parameterAsDouble(parameters, self.SEA_LEVEL, context),
+            nodata_mode=self.NODATA_KEYS[
+                self.parameterAsEnum(parameters, self.NODATA_MODE, context)],
             hand_jitter=self.parameterAsDouble(parameters, self.HAND_JITTER, context),
             bulk_shade=(dens if shade_style == 1 else 0.0),
             bulk_win=self.parameterAsInt(parameters, self.BULK_WIN, context),

@@ -35,9 +35,12 @@ import numpy as np
 
 _PXI = 90.0   # data px per figure inch (figsize = cols/90 in all cores)
 _Z = 3.5      # frame/ticks: below framework (4) and strokes (5) -- relief
-              # displaced upward overlaps the frame with all its line work;
-              # above the fill (~1), dot screen (1.6) and plains stipple (3)
+              # line work displaced upward overlaps the frame; the relief
+              # BODY (draped fill, z~1) does not, so the top horizontal
+              # frame lines are additionally BROKEN along the silhouette
+              # (top_profile); above dot screen (1.6) and stipple (3)
 _ZC = 20.0    # cartouches (scale bar, legend): on top of everything
+_TOL = 0.75   # silhouette tolerance, px: relief flush with a line keeps it
 
 # grid step candidates, arc-seconds (15 minutes or coarser)
 _STEPS_SEC = [900, 1800, 3600, 7200, 18000, 36000, 72000]
@@ -78,11 +81,70 @@ def _pix2world(colv, rowv, g):
     return x, y
 
 
-def _rect(ax, x0, y0, x1, y1, lw_pt, color):
-    from matplotlib.patches import Rectangle
-    ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False,
-                           edgecolor=color, linewidth=lw_pt,
-                           joinstyle="miter", zorder=_Z, clip_on=False))
+def _top_gaps(y, top_profile, cols):
+    """X intervals where the relief silhouette rises ABOVE the horizontal
+    line at level y (Y axis points down: "above" = smaller). top_profile
+    is the per-column minimum screen Y; its length need not equal cols."""
+    if top_profile is None:
+        return []
+    tp = np.asarray(top_profile, float)
+    n = tp.size
+    if n < 2:
+        return []
+    covered = np.isfinite(tp) & (tp <= y - _TOL)
+    if not covered.any():
+        return []
+    sx = float(cols) / n
+    m = covered.astype(np.int8)
+    d = np.diff(np.concatenate(([0], m, [0])))
+    return [(float(i0) * sx, float(i1) * sx)
+            for i0, i1 in zip(np.flatnonzero(d == 1), np.flatnonzero(d == -1))]
+
+
+def _hline_segs(y, xa, xb, top_profile, cols):
+    """Horizontal line at level y from xa to xb, broken by the silhouette."""
+    segs = []
+    x = xa
+    for ga, gb in _top_gaps(y, top_profile, cols):
+        ga = max(ga, xa); gb = min(gb, xb)
+        if gb <= ga:
+            continue
+        if ga > x:
+            segs.append([(x, y), (ga, y)])
+        x = max(x, gb)
+    if x < xb:
+        segs.append([(x, y), (xb, y)])
+    return segs
+
+
+def _covered_at(top_profile, cols, x, y):
+    """Does the relief silhouette cover the point (x, y)?"""
+    if top_profile is None:
+        return False
+    tp = np.asarray(top_profile, float)
+    if tp.size < 1:
+        return False
+    i = int(np.clip(round(x * tp.size / float(cols)), 0, tp.size - 1))
+    return bool(np.isfinite(tp[i]) and tp[i] <= y - _TOL)
+
+
+def _rect(ax, x0, y0, x1, y1, lw_pt, color, top_profile=None, cols=None):
+    """Frame. With top_profile given, the TOP side (y0) is drawn as
+    segments -- no line where the relief juts past the top edge."""
+    if top_profile is None:
+        from matplotlib.patches import Rectangle
+        ax.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False,
+                               edgecolor=color, linewidth=lw_pt,
+                               joinstyle="miter", zorder=_Z, clip_on=False))
+        return
+    from matplotlib.collections import LineCollection
+    segs = [[(x0, y1), (x1, y1)],            # bottom
+            [(x0, y0), (x0, y1)],            # left
+            [(x1, y0), (x1, y1)]]            # right
+    segs += _hline_segs(y0, x0, x1, top_profile, cols if cols else x1)
+    ax.add_collection(LineCollection(
+        segs, colors=[color], linewidths=lw_pt, capstyle="butt",
+        zorder=_Z, clip_on=False))
 
 
 def _step_deg(span_deg, n_target=3):
@@ -143,7 +205,7 @@ def _steps(vals):
 
 
 def _checker_frame(ax, geff, f, rows, cols, margin, off, paper, ink,
-                   thin, log):
+                   thin, log, top_profile=None):
     """Map border: an inner line along the raster, a gap, and a narrow
     band of alternating black-and-white segments along the outer frame.
     Segment cuts are multiples of 1/5 of the grid step; parity is tied to
@@ -153,7 +215,7 @@ def _checker_frame(ax, geff, f, rows, cols, margin, off, paper, ink,
     r_in = off - band                     # inner edge of the band
     t, sides, vals = _side_values(geff, f, rows, cols)
     step_lon, step_lat = _steps(vals)
-    for (kind, cv, rv, nrm, st), vv in zip(sides, vals):
+    for si_, ((kind, cv, rv, nrm, st), vv) in enumerate(zip(sides, vals)):
         sub = (step_lon if kind == "lon" else step_lat) / 5.0
         k0 = int(np.floor(vv.min() / sub))
         k1 = int(np.ceil(vv.max() / sub))
@@ -169,6 +231,9 @@ def _checker_frame(ax, geff, f, rows, cols, margin, off, paper, ink,
             dark = int(np.floor(v_mid / sub)) % 2 == 0
             pa = (float(np.interp(a, t, cv)), float(np.interp(a, t, rv)))
             pb = (float(np.interp(b, t, cv)), float(np.interp(b, t, rv)))
+            if si_ == 0 and _covered_at(top_profile, cols,
+                                        0.5 * (pa[0] + pb[0]), -r_in):
+                continue          # checker hidden by relief jutting out
             ia = (pa[0] + nrm[0] * r_in, pa[1] + nrm[1] * r_in)
             ib = (pb[0] + nrm[0] * r_in, pb[1] + nrm[1] * r_in)
             qa = (pa[0] + nrm[0] * off, pa[1] + nrm[1] * off)
@@ -177,9 +242,11 @@ def _checker_frame(ax, geff, f, rows, cols, margin, off, paper, ink,
                 [ia, ib, qb, qa], closed=True,
                 facecolor=(ink if dark else paper), edgecolor=ink,
                 linewidth=thin * 0.5, zorder=_Z, clip_on=False))
-    _rect(ax, 0, 0, cols, rows, thin, ink)
-    _rect(ax, -r_in, -r_in, cols + r_in, rows + r_in, thin * 0.8, ink)
-    _rect(ax, -off, -off, cols + off, rows + off, thin, ink)
+    _rect(ax, 0, 0, cols, rows, thin, ink, top_profile, cols)
+    _rect(ax, -r_in, -r_in, cols + r_in, rows + r_in, thin * 0.8, ink,
+          top_profile, cols)
+    _rect(ax, -off, -off, cols + off, rows + off, thin, ink,
+          top_profile, cols)
 
 
 def _north_vec(geff, proj_wkt, rows, cols):
@@ -220,10 +287,10 @@ def _compass(ax, geff, proj_wkt, rows, cols, margin, paper, ink,
             log("Compass: north assumed up (CRS/pyproj: %s)" % e)
         nc, nr = 0.0, -1.0
     th0 = np.arctan2(nr, nc)              # north angle in the data plane
-    L = 1.5 * margin                      # main ray length
+    L = 0.75 * margin                     # main ray length (v7.2.4: halved)
     cx = cols - 1.4 * margin - L
     cy = 1.4 * margin + L
-    lwp = _pt(max(1.0, 0.015 * margin), cols, margin)
+    lwp = _pt(max(0.8, 0.010 * margin), cols, margin)
 
     def ray(theta, length):
         tip = (cx + length * np.cos(theta), cy + length * np.sin(theta))
@@ -243,7 +310,7 @@ def _compass(ax, geff, proj_wkt, rows, cols, margin, paper, ink,
         ray(th0, L)                       # north ray on top
     else:
         ray(th0, L)                       # single north arrow
-    fs = _pt(max(fs_px, 0.22 * margin), cols, margin)
+    fs = _pt(max(0.5 * fs_px, 0.11 * margin), cols, margin)
     ax.text(cx + 1.28 * L * np.cos(th0), cy + 1.28 * L * np.sin(th0), "N",
             fontsize=fs, color=ink, ha="center", va="center",
             fontweight="bold", zorder=_ZC, clip_on=False)
@@ -294,14 +361,15 @@ def _scalebar(ax, geff, f, rows, cols, margin, paper, ink, fs_px, log):
         if log:
             log("Scale bar skipped: %s" % e)
         return
-    total_m = _nice_len_m(0.22 * cols * mpp)
+    total_m = _nice_len_m(0.11 * cols * mpp)   # v7.2.4: halved
     L = total_m / mpp                     # bar length, data px
     seg = L / 4.0
-    h = max(4.0, 0.9 * fs_px)             # bar height
+    fs_bar = 0.5 * fs_px                  # v7.2.4: labels halved
+    h = max(2.0, 0.9 * fs_bar)            # bar height
     x0 = 1.2 * margin
     y1 = rows - 1.2 * margin              # bar bottom
     y0 = y1 - h
-    fs = _pt(fs_px, cols, margin)
+    fs = _pt(fs_bar, cols, margin)
     lwp = _pt(max(1.0, 0.10 * h), cols, margin)
     for i in range(4):
         ax.add_patch(Rectangle(
@@ -435,7 +503,8 @@ def _legend(ax, rows, cols, margin, paper, ink, fs_px, extras, log):
                 ha="left", va="center", zorder=_ZC, clip_on=False)
 
 
-def _draw_ticks(ax, geff, f, rows, cols, margin, ink, off, fs_px, log):
+def _draw_ticks(ax, geff, f, rows, cols, margin, ink, off, fs_px, log,
+                top_profile=None):
     """Graticule ticks: outward from the outer frame edge; labels are
     offset from the frame (from its outer line for double/map border)."""
     from matplotlib.collections import LineCollection
@@ -447,7 +516,7 @@ def _draw_ticks(ax, geff, f, rows, cols, margin, ink, off, fs_px, log):
     step_lon, step_lat = _steps(vals)
     segs = []
     n = 0
-    for (kind, cv, rv, nrm, st), vv in zip(sides, vals):
+    for si_, ((kind, cv, rv, nrm, st), vv) in enumerate(zip(sides, vals)):
         step = step_lon if kind == "lon" else step_lat
         side_len = cols if kind == "lon" else rows
         cand = []
@@ -469,6 +538,8 @@ def _draw_ticks(ax, geff, f, rows, cols, margin, ink, off, fs_px, log):
         for pos, w_px, tc, txt in kept:
             pc = float(np.interp(tc, t, cv))
             pr = float(np.interp(tc, t, rv))
+            if si_ == 0 and _covered_at(top_profile, cols, pc, -off):
+                continue      # tick and label hidden by the relief
             segs.append([(pc + nrm[0] * off, pr + nrm[1] * off),
                          (pc + nrm[0] * (off + tlen),
                           pr + nrm[1] * (off + tlen))])
@@ -484,11 +555,15 @@ def _draw_ticks(ax, geff, f, rows, cols, margin, ink, off, fs_px, log):
 
 
 def draw_sheet(ax, geff, proj_wkt, rows, cols, margin, paper, ink, opts,
-               top_pad=0.0, extras=None, log=None):
+               top_pad=0.0, extras=None, log=None, top_profile=None):
     """Sheet decoration. opts: dict(frame=0..4, ticks, scalebar, legend,
     grain, dot, misreg). frame: 0 none, 1 single, 2 double,
     3 thick-thin, 4 map border (checkered degree fractions).
-    misreg is applied by the core after savefig (print_fx.misregister)."""
+    misreg is applied by the core after savefig (print_fx.misregister).
+
+    top_profile -- per-column minimum screen Y of the relief (data px,
+    axis down): the top horizontal frame lines, checkers and ticks are
+    broken wherever the relief juts past the top edge of the sheet."""
     extras = extras or {}
     frame = int(opts.get("frame", 0))
     thin = _pt(max(1.5, 0.022 * margin), cols, margin)
@@ -503,24 +578,27 @@ def draw_sheet(ax, geff, proj_wkt, rows, cols, margin, paper, ink, opts,
             if log:
                 log("CRS/pyproj unavailable, graticule and scale bar skipped: %s" % e)
     if frame == 1:
-        _rect(ax, 0, 0, cols, rows, thick * 0.7, ink)
+        _rect(ax, 0, 0, cols, rows, thick * 0.7, ink, top_profile, cols)
     elif frame == 2:
-        _rect(ax, 0, 0, cols, rows, thin, ink)
-        _rect(ax, -off, -off, cols + off, rows + off, thin, ink)
+        _rect(ax, 0, 0, cols, rows, thin, ink, top_profile, cols)
+        _rect(ax, -off, -off, cols + off, rows + off, thin, ink,
+              top_profile, cols)
     elif frame == 3:
-        _rect(ax, 0, 0, cols, rows, thin, ink)
-        _rect(ax, -off, -off, cols + off, rows + off, thick, ink)
+        _rect(ax, 0, 0, cols, rows, thin, ink, top_profile, cols)
+        _rect(ax, -off, -off, cols + off, rows + off, thick, ink,
+              top_profile, cols)
     elif frame == 4:
         if f is not None:
             _checker_frame(ax, geff, f, rows, cols, margin, off,
-                           paper, ink, thin, log)
+                           paper, ink, thin, log, top_profile)
         else:   # fallback without CRS: double frame
-            _rect(ax, 0, 0, cols, rows, thin, ink)
-            _rect(ax, -off, -off, cols + off, rows + off, thin, ink)
+            _rect(ax, 0, 0, cols, rows, thin, ink, top_profile, cols)
+            _rect(ax, -off, -off, cols + off, rows + off, thin, ink,
+                  top_profile, cols)
     n = 0
     if opts.get("ticks") and f is not None:
         n = _draw_ticks(ax, geff, f, rows, cols, margin, ink, off,
-                        fs_px, log)
+                        fs_px, log, top_profile)
     if opts.get("scalebar") and f is not None:
         _scalebar(ax, geff, f, rows, cols, margin, paper, ink, fs_px, log)
     if int(opts.get("compass", 0)) > 0:

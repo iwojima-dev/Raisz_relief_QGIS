@@ -164,8 +164,38 @@ def rel_slope_norm(slope_deg, p_cut=30.0, p_top=95.0, log=None):
     return thr, top
 
 
-def read_dem(dem_path, grid):
-    """Read the DEM on the working grid. Returns (z, px, py)."""
+def valid_mask(z, nd):
+    """Mask of valid cells. Average resampling blends nodata with data and
+    yields "almost nodata" (absurd magnitudes for -3.4e38), so besides the
+    exact comparison we also reject out-of-range values."""
+    bad = ~np.isfinite(z)
+    if nd is not None:
+        bad |= (z == nd)
+        if abs(nd) > 1e30:
+            bad |= (z < -1e30) if nd < 0 else (z > 1e30)
+    return ~bad
+
+
+def _fill_nearest(z, valid):
+    """Plug invalid cells with the nearest valid value: needed so that
+    gradients and morphology do not fall apart along the edge."""
+    if valid.all():
+        return z
+    zz = np.where(valid, z, np.nan)
+    idx = ndimage.distance_transform_edt(
+        ~np.isfinite(zz), return_distances=False, return_indices=True)
+    return zz[tuple(idx)]
+
+
+def read_dem(dem_path, grid, nodata_mode="plain", sea_level=0.0):
+    """Read the DEM on the working grid. Returns (z, px, py, valid).
+
+    nodata_mode -- what to put in areas without data:
+      'plain' -- the nearest valid value (as before): reads as a plain;
+      'sea'   -- sea level: flat water, the core adds it to the sea polygons;
+      'paper' -- also nearest (for numerical stability), but valid=False and
+                 the core draws no fill, no strokes and no framework there.
+    """
     ds = gdal.Open(dem_path)
     band = ds.GetRasterBand(1)
     nd = band.GetNoDataValue()
@@ -175,14 +205,13 @@ def read_dem(dem_path, grid):
     except Exception:
         z = band.ReadAsArray(buf_xsize=grid.nx, buf_ysize=grid.ny).astype("float64")
     px = abs(grid.geff[1]); py = abs(grid.geff[5])
-    mask = np.isfinite(z) if nd is None else (z != nd) & np.isfinite(z)
-    if not mask.all():
-        z = np.where(mask, z, np.nan)
-        idx = ndimage.distance_transform_edt(
-            ~np.isfinite(z), return_distances=False, return_indices=True)
-        z = z[tuple(idx)]
+    valid = valid_mask(z, nd)
+    if nodata_mode == "sea":
+        z = np.where(valid, z, float(sea_level))
+    else:
+        z = _fill_nearest(z, valid)
     ds = None
-    return z, px, py
+    return z, px, py, valid
 
 
 def estimate_memory_gb(grid, dpi, n_arrays=11):
@@ -237,14 +266,15 @@ def sea_polygons(z, geff, level=0.0, min_cells=8):
     return out
 
 
-def read_dem_window(dem_path, grid, r0, r1):
+def read_dem_window(dem_path, grid, r0, r1, nodata_mode="plain",
+                    sea_level=0.0):
     """Read a STRIP of working rows [r0, r1) of the grid (for striping --
-    no full DEM array in memory). Returns z (float64) of shape
-    (r1-r0, grid.nx). Nodata is replaced by the strip minimum of valid values."""
+    no full DEM array in memory). Returns (z, valid) of shape
+    (r1-r0, grid.nx). nodata_mode is as in read_dem."""
     r0 = max(0, int(r0)); r1 = min(int(r1), grid.ny)
     h = r1 - r0
     if h <= 0:
-        return np.empty((0, grid.nx))
+        return np.empty((0, grid.nx)), np.empty((0, grid.nx), bool)
     ds = gdal.Open(dem_path)
     band = ds.GetRasterBand(1)
     nd = band.GetNoDataValue()
@@ -258,8 +288,37 @@ def read_dem_window(dem_path, grid, r0, r1):
     except Exception:
         z = band.ReadAsArray(0, ry0, grid.ox, ry1 - ry0,
                              buf_xsize=grid.nx, buf_ysize=h).astype("float64")
-    mask = np.isfinite(z) if nd is None else (z != nd) & np.isfinite(z)
-    if not mask.all():
-        z = np.where(mask, z, np.nanmin(z[mask]) if mask.any() else 0.0)
+    valid = valid_mask(z, nd)
+    if nodata_mode == "sea":
+        z = np.where(valid, z, float(sea_level))
+    else:
+        z = _fill_nearest(z, valid)
     ds = None
-    return z
+    return z, valid
+
+
+def nodata_polygons(valid, geff):
+    """Polygons of the area WITHOUT data (for nodata='sea'): the same
+    rings-with-holes as auto-sea, drawn with the sea style."""
+    if valid is None or valid.all():
+        return []
+    synth = np.where(valid, 1.0, -1.0)
+    return sea_polygons(synth, geff, level=0.0, min_cells=1)
+
+
+def as_rings(item):
+    """Normalise an overlay item to a list of rings [outer, hole1, ...].
+
+    Accepts both a "flat" ring (N,2) and a ready list of rings -- this
+    keeps backward compatibility with the old overlay format and lets all
+    consumers (compose, patterns) work uniformly, with holes."""
+    if isinstance(item, np.ndarray) and item.ndim == 2:
+        return [item]
+    try:
+        first = item[0]
+    except Exception:
+        return []
+    fa = np.asarray(first, dtype="float64")
+    if fa.ndim == 2 and fa.shape[-1] == 2:            # already a ring list
+        return [np.asarray(r, dtype="float64") for r in item]
+    return [np.asarray(item, dtype="float64")]        # a single ring

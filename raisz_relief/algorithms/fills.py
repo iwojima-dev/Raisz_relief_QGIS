@@ -158,12 +158,14 @@ def build_base_fill(mode, z, disp, illum, grid, *, palette="patterson",
                     shade=0.35, override_min=None, override_max=None,
                     stretch=False, thematic_polys=None, alpha=0.85,
                     geff_rot=None, bulk_shade=0.0, bulk_win=120,
-                    light_az=315.0, ink="#2a1d10"):
+                    light_az=315.0, ink="#2a1d10", valid=None):
     """Assemble the base fill and return (img, extent) or (None, None).
 
     mode: 'none' | 'elevation' | 'thematic'. Thematic overrides elevation.
     geff_rot: rotated georeference (with view rotation) -- to rasterize
     thematics in the rotated z frame; None -> the original grid.
+    valid: data mask; outside it the fill is fully transparent (nodata
+    mode 'paper'), so the area without data stays clean paper.
     """
     if mode == "elevation":
         rgba = build_elevation_rgba(
@@ -182,7 +184,12 @@ def build_base_fill(mode, z, disp, illum, grid, *, palette="patterson",
         rgba = None
     if bulk_shade > 0.0:
         m = _bulk_shade_mask(z, light_az, bulk_win)
+        if valid is not None:
+            m = m * valid
         rgba = _shade_over(rgba, ink, m, bulk_shade)
     if rgba is None:
         return None, None
+    if valid is not None:
+        rgba = rgba.copy()
+        rgba[..., 3] *= np.asarray(valid, "float64")
     return drape_image(rgba, disp)

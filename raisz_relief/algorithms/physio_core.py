@@ -71,6 +71,7 @@ def render_landform(
         auto_sea=False, sea_level=0.0, ink="#2a1d10", hand_jitter=0.0,
         sheet=None, bulk_shade=0.0, bulk_win=120, anag=0.0, anag_spacing=6,
         rel_scale=False, rel_target=12.0, rel_levels=12, rel_slopes=False,
+        nodata_mode="plain",
         max_px=2000, dpi=150, bg="#f4ecd6", progress=None):
     """Hybrid landform map with the decoration layer -> PNG."""
     import matplotlib
@@ -87,13 +88,24 @@ def render_landform(
     tick(3, "Reading and preparing the DEM...")
     if grid is None:
         grid = gridmod.working_grid(dem_path, max_px=max_px)
-    z0, px, py = gridmod.read_dem(dem_path, grid)
+    z0, px, py, valid = gridmod.read_dem(dem_path, grid, nodata_mode, sea_level)
     geff = grid.geff
     if view_rot:
         z0, geff = gridmod.rotate_view(z0, geff, view_rot)
+        valid = np.rot90(valid, int(view_rot) % 4)
         if view_rot % 2 == 1:
             px, py = py, px
     rows, cols = z0.shape
+    if not valid.all():
+        tick(4, "No data: %.1f%% of the frame, mode '%s'"
+             % (100.0 * (~valid).mean(), nodata_mode))
+        _nr = gridmod.nodata_polygons(valid, geff)
+        if _nr:
+            overlays = dict(overlays)
+            # the nodata border is the same survey cut as the sheet frame
+            overlays["nodata_edges"] = _nr
+            if nodata_mode == "sea":
+                overlays["sea_auto"] = list(overlays.get("sea_auto", [])) + _nr
     if auto_sea:
         _srings = gridmod.sea_polygons(z0, geff, sea_level)
         if _srings:
@@ -166,6 +178,11 @@ def render_landform(
 
     tick(42, "Hidden-line removal...")
     vis = floating_horizon(disp, rows)
+    if nodata_mode == "paper":
+        # 'paper': no strokes, no framework, no plains stipple outside data
+        vis = vis & valid
+        w_plain = w_plain * valid
+        w_relief = w_relief * valid
 
     def smp(a, r, c):
         return ndimage.map_coordinates(
@@ -186,7 +203,8 @@ def render_landform(
         override_min=override_min, override_max=override_max, stretch=stretch,
         thematic_polys=overlays.get("thematic"), alpha=fill_alpha,
         geff_rot=(geff if view_rot else None),
-        bulk_shade=bulk_shade, bulk_win=bulk_win, light_az=light_az, ink=ink)
+        bulk_shade=bulk_shade, bulk_win=bulk_win, light_az=light_az, ink=ink,
+        valid=(valid if nodata_mode == "paper" else None))
     compose.blit_fill(ax, img, extent, z=1)
     if anag > 0.0:
         from . import engrave
@@ -399,6 +417,8 @@ def render_landform(
 
     tick(95, "Saving output...")
     disp_max = float(disp.max())
+    # silhouette: per-column minimum screen Y -- breaks the top frame line
+    top_profile = (np.arange(rows)[:, None] - disp).min(axis=0)
     margin = 0.04 * max(rows, cols)
     n_sheet = {}
     if sheet:
@@ -408,14 +428,14 @@ def render_landform(
             top_pad=disp_max,
             extras=dict(styles=styles, overlays=overlays, fall=draw_fall,
                         stipple=draw_stipple, auto_sea=auto_sea),
-            log=lambda m: tick(94, m))
+            log=lambda m: tick(94, m), top_profile=top_profile)
     ax.set_xlim(-margin, cols + margin)
     ax.set_ylim(rows + margin, -disp_max - margin)
     ax.set_aspect("equal"); ax.axis("off")
     plt.subplots_adjust(0, 0, 1, 1)
     os.makedirs(os.path.dirname(out_png) or ".", exist_ok=True)
     plt.savefig(out_png, dpi=dpi, facecolor=fig.get_facecolor(),
-                bbox_inches="tight", pad_inches=0.0)
+                bbox_inches="tight", pad_inches=0.12)
     plt.close(fig)
     if sheet and sheet.get("misreg", 0) > 0:
         from . import print_fx

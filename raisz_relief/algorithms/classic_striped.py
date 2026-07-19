@@ -85,6 +85,7 @@ def render_classic_striped(
         strip_rows=2048, fill_max_px=2500, sheet=None,
         bulk_shade=0.0, bulk_win=120, anag=0.0, anag_spacing=6,
         rel_scale=False, rel_target=12.0, rel_levels=12, rel_slopes=False,
+        nodata_mode="plain",
         dpi=150, bg="#f4ecd6", progress=None):
     import matplotlib
     matplotlib.use("Agg")
@@ -109,7 +110,8 @@ def render_classic_striped(
     # -- downsampled pass: fill + global min/max for contour levels --
     tick(8, "Downsampled fill...")
     g_ds = gridmod.working_grid(dem_path, max_px=fill_max_px)
-    z_ds, pxd, pyd = gridmod.read_dem(dem_path, g_ds)
+    z_ds, pxd, pyd, valid_ds = gridmod.read_dem(dem_path, g_ds, nodata_mode,
+                                                sea_level)
     m_ds = _morphometry(z_ds, pxd, pyd, base_scale_px, light_az, light_alt,
                         vert_exag, view_angle)
     disp_ds = m_ds["disp"]                    # downsampled disp for decoration
@@ -136,7 +138,7 @@ def render_classic_striped(
             palette=palette, shade=hypso_shade, override_min=override_min,
             override_max=override_max, stretch=stretch, alpha=fill_alpha,
             bulk_shade=bulk_shade, bulk_win=win_ds, light_az=light_az,
-            ink=ink)
+            ink=ink, valid=(valid_ds if nodata_mode == "paper" else None))
         if img is not None:
             sy = R / float(g_ds.ny)
             ext_full = (0, C, ext[2] * sy, ext[3] * sy)
@@ -169,7 +171,8 @@ def render_classic_striped(
         tick(15 + int(78 * si / max(len(starts), 1)),
              "Strip %d/%d..." % (si + 1, len(starts)))
         pr0 = max(0, r0 - pad); pr1 = min(R, r1 + pad)
-        zt = gridmod.read_dem_window(dem_path, grid, pr0, pr1)
+        zt, vt = gridmod.read_dem_window(dem_path, grid, pr0, pr1,
+                                         nodata_mode, sea_level)
         if zt.shape[0] < 2:
             continue
         M = _morphometry(zt, px, py, base_scale_px, light_az, light_alt,
@@ -192,6 +195,8 @@ def render_classic_striped(
         prev = cummin[:-1]
         vis_core = (flip < prev - 1e-6)[::-1]
         vis_core = ndimage.binary_dilation(vis_core, iterations=1)
+        if nodata_mode == "paper":
+            vis_core = vis_core & vt[lo:hi]      # 'paper': empty outside data
         carried = cummin[-1].copy()                  # min over rows >= r0
 
         def smp(a, r_loc, c):
@@ -283,7 +288,7 @@ def render_classic_striped(
                         fall_lw.append(np.full(K, Wc))
                     a = min(0.45 + 0.5 * dk, 0.95)
                     fall_col.append(np.tile([*ink_rgb, a], (K, 1)))
-        del zt, M, disp_t, dzdE, dzdN, slope_n, illum, darkness
+        del zt, vt, M, disp_t, dzdE, dzdN, slope_n, illum, darkness
 
     tick(94, "Assembling and saving...")
     if frame_seg:
@@ -299,6 +304,14 @@ def render_classic_striped(
 
     # -- decoration over the DOWNSAMPLED disp (full-sheet coordinates) --
     ov = overlays or {}
+    if not valid_ds.all():
+        _nr = gridmod.nodata_polygons(valid_ds, g_ds.geff)
+        if _nr:
+            ov = dict(ov)
+            # the nodata border is the same survey cut as the sheet frame
+            ov["nodata_edges"] = _nr
+            if nodata_mode == "sea":
+                ov["sea_auto"] = list(ov.get("sea_auto", [])) + _nr
     if auto_sea:
         _sr = gridmod.sea_polygons(z_ds, g_ds.geff, sea_level)
         if _sr:
@@ -333,14 +346,17 @@ def render_classic_striped(
             top_pad=disp_max_g,
             extras=dict(styles=styles, overlays=overlays,
                         fall=draw_fall, stipple=False, auto_sea=auto_sea),
-            log=lambda m: tick(97, m))
+            log=lambda m: tick(97, m),
+            # carried after the topmost strip = per-column minimum screen
+            # Y over every sheet row (the relief silhouette)
+            top_profile=np.where(np.isfinite(carried), carried, np.inf))
     ax.set_xlim(-margin, C + margin)
     ax.set_ylim(R + margin, -disp_max_g - margin)
     ax.set_aspect("equal"); ax.axis("off")
     plt.subplots_adjust(0, 0, 1, 1)
     os.makedirs(os.path.dirname(out_png) or ".", exist_ok=True)
     plt.savefig(out_png, dpi=dpi, facecolor=fig.get_facecolor(),
-                bbox_inches="tight", pad_inches=0.0)
+                bbox_inches="tight", pad_inches=0.12)
     plt.close(fig)
     if sheet and sheet.get("misreg", 0) > 0:
         from . import print_fx

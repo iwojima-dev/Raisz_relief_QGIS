@@ -250,6 +250,7 @@ class ClassicAlgorithm(ReliefAlgorithmBase):
                 hand_jitter=fk["hand_jitter"], overlays=overlays,
                 water_patterns=fk["water_patterns"], auto_sea=fk["auto_sea"],
                 sea_level=fk["sea_level"], sheet=sk,
+                nodata_mode=fk["nodata_mode"],
                 bulk_shade=fk["bulk_shade"], bulk_win=fk["bulk_win"],
                 anag=fk["anag"], anag_spacing=fk["anag_spacing"], **rel,
                 strip_rows=strip_rows, dpi=dpi, progress=progress)

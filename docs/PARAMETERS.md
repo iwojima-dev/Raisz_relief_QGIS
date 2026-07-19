@@ -91,7 +91,8 @@ the hachures but below area waters, clipped behind mountains.
 |---|---|---|
 | Auto-sea from DEM | off | Builds a water polygon at the given level directly from the DEM; island holes preserved. |
 | Sea level, m | 0 | Threshold of the auto-sea. |
-| Hydrography patterns | off | Coastal vignette along true shores, hatching in lakes, tuft symbols in marshes. |
+| Areas without data (nodata) shown as | Plain | What to do where the DEM has no data. **Plain** fills with the nearest elevations (previous behaviour), which reads as a flat plain. **Sea** floods the gap at sea level and adds it to the sea polygons. **Paper** leaves it undrawn — no fill, no strokes, no framework. In every mode the nodata border counts as an artificial edge, so no coastal vignette runs along it. |
+| Hydrography patterns | off | Coastal vignette along true shores, hatching in lakes, tuft symbols in marshes. Polygon holes are honoured: islands keep their own shore band, and hatching stays off them. |
 
 ---
 

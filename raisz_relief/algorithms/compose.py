@@ -26,7 +26,7 @@ from scipy import ndimage
 from matplotlib.collections import LineCollection
 import matplotlib.patheffects as path_effects
 
-from .grid import world_to_pixel
+from .grid import world_to_pixel, as_rings
 
 
 def _disp_at(disp, r, c):
@@ -101,16 +101,11 @@ def draw_lines(ax, lines, geff, disp, color, lw, z, alpha=1.0,
 
 def draw_polys(ax, polys, geff, disp, z, face=None, edge=None, lw=0.4,
                alpha=1.0):
-    n = 0
-    for ring in polys:
-        if len(ring) < 3:
-            continue
-        col, row, sy = to_screen(ring, geff, disp)
-        ax.fill(col, sy, facecolor=(face if face else "none"),
-                edgecolor=(edge if edge else "none"),
-                linewidth=lw, alpha=alpha, zorder=z, antialiased=True)
-        n += 1
-    return n
+    """Decoration polygons. Each item is rings [outer, hole1, ...]
+    (as_rings also accepts a "flat" ring). Holes are cut out, so islands
+    in seas/lakes/ice caps do not sink."""
+    return draw_poly_holes(ax, [as_rings(p) for p in polys], geff, disp, z,
+                           face=face, edge=edge, lw=lw, alpha=alpha)
 
 
 def draw_poly_holes(ax, polys, geff, disp, z, face=None, edge=None, lw=0.4,
@@ -220,13 +215,16 @@ def draw_area_waters(ax, overlays, geff, disp, styles, z0=2, pat=None):
 
     if pat and pat.get("enable"):
         from . import patterns as P
-        seas = list(overlays.get("sea", [])) + [rl[0] for rl in sea_auto]
+        # the layer and auto-sea now share one format (rings with holes):
+        # the vignette also follows island shores
+        seas = list(overlays.get("sea", [])) + list(sea_auto)
         lakes = overlays.get("lake", [])
         marsh = overlays.get("marsh", [])
         if seas:
             segs = P.coastal_vignette(seas, pat["vignette_step"],
                                       pat.get("vignette_n", 3),
-                                      extent=pat.get("extent"))
+                                      extent=pat.get("extent"),
+                                      edges=overlays.get("nodata_edges"))
             draw_map_segments(ax, segs, geff, disp, styles["sea"]["edge"],
                               lw=0.4, z=z0 + 1, alpha=0.55)
         if lakes:

@@ -32,11 +32,22 @@ Dependency: shapely.
 
 import numpy as np
 
+from .grid import as_rings
+
 
 def _poly(ring):
+    """Rings [outer, hole1, ...] (or a single ring) -> Polygon.
+
+    Holes are handed to shapely, so the patterns respect them: lake
+    hatching and marsh symbols stay off the islands, vignettes and form
+    lines also follow the inner shores."""
     from shapely.geometry import Polygon
     try:
-        p = Polygon(np.asarray(ring))
+        rings = as_rings(ring)
+        if not rings or len(rings[0]) < 3:
+            return None
+        holes = [np.asarray(h) for h in rings[1:] if len(h) >= 3]
+        p = Polygon(np.asarray(rings[0]), holes)
         if not p.is_valid:
             p = p.buffer(0)
         return p if (not p.is_empty and p.area > 0) else None
@@ -73,39 +84,78 @@ def _sample_points(poly, spacing, jitter=0.45, seed=17):
 
 # --------------------------- hydrography ----------------------------------
 
-def coastal_vignette(rings, step, n=3, extent=None):
+def coastal_vignette(rings, step, n=3, extent=None, min_island=2.0,
+                     edges=None):
     """n concentric lines inward from the shore, step in meters.
     extent=(xmin,ymin,xmax,ymax): band sections along the DEM frame
     (artificial edges) are cut away, keeping only the band along the
-    true coastline."""
-    from shapely.geometry import box
-    inner = None
+    true coastline.
+
+    edges: extra artificial edges -- rings of the areas without data
+    (nodata). Their border is not a shore but the same survey cut as the
+    frame, so no band is drawn along it.
+
+    min_island: islands (holes) smaller than (min_island*step)^2 take no
+    part in the band -- the band is wider than they are, and every extra
+    ring makes the boundary and all buffers heavier."""
+    from shapely.geometry import box, Polygon, LineString
+    # The band is the outline pushed inward by step*k. A section produced
+    # by the artificial edge of the territory lies step*k from the FRAME,
+    # a section from a real shore lies step*k from the shore; the two sets
+    # complement each other. Previously the selection went through
+    # coast.buffer() on the shore: on a polygon with hundreds of islands
+    # one such buffer costs ~15 s. The frame, by contrast, is a rectangle
+    # and its buffer is computed once per call.
+    zones = [None] * n
+    art = []
     if extent is not None:
         xmin, ymin, xmax, ymax = extent
-        eps = step * 0.5
-        inner = box(xmin + eps, ymin + eps, xmax - eps, ymax - eps)
+        art.append(box(xmin, ymin, xmax, ymax).boundary)
+    for e in (edges or []):
+        for r in as_rings(e):
+            a = np.asarray(r, dtype="float64")
+            if len(a) >= 2:
+                art.append(LineString(a))
+    if art:
+        if len(art) == 1:
+            edge_geom = art[0]
+        else:
+            from shapely.ops import unary_union
+            edge_geom = unary_union(art)
+        zones = [edge_geom.buffer(step * k + step * 0.25)
+                 for k in range(1, n + 1)]
     out = []
+    amin = (float(min_island) * step) ** 2
     for ring in rings:
         poly = _poly(ring)
         if poly is None:
             continue
-        coast = None
-        if inner is not None:
-            coast = poly.boundary.intersection(inner)   # shore without the frame
-            if coast.is_empty:
-                continue
+        # drop tiny islands FROM THE BAND GEOMETRY (not from the fill!)
+        if poly.interiors and amin > 0:
+            keep_h = [h for h in poly.interiors if Polygon(h).area >= amin]
+            if len(keep_h) != len(poly.interiors):
+                try:
+                    poly = Polygon(poly.exterior, keep_h)
+                except Exception:
+                    pass
+                if poly.is_empty:
+                    continue
         for k in range(1, n + 1):
+            zone = zones[k - 1]
             for g in _geoms(poly.buffer(-step * k)):
                 if g.geom_type != "Polygon" or g.exterior is None:
                     continue
-                ering = g.exterior
-                if coast is None:
-                    out.append(np.asarray(ering.coords))
-                    continue
-                keep = ering.intersection(coast.buffer(step * k + step * 0.75))
-                for gg in _geoms(keep):
-                    if gg.geom_type in ("LineString", "LinearRing") and gg.length > 0:
-                        out.append(np.asarray(gg.coords))
+                # outer shore + island (hole) shores: the band runs around
+                # every island, as on hand-drawn maps
+                for ering in [g.exterior] + list(g.interiors):
+                    if zone is None:
+                        out.append(np.asarray(ering.coords))
+                        continue
+                    keep = ering.difference(zone)
+                    for gg in _geoms(keep):
+                        if (gg.geom_type in ("LineString", "LinearRing")
+                                and gg.length > 0):
+                            out.append(np.asarray(gg.coords))
     return out
 
 

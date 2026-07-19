@@ -85,7 +85,12 @@ def extract_lines(layer, to_crs, extent=None):
 
 
 def extract_polys(layer, to_crs, extent=None):
-    """Exterior polygon rings -> a list of (N,2) arrays."""
+    """Polygons -> a list of rings [outer, hole1, ...] ((N,2) arrays).
+
+    Holes are PRESERVED: without them islands in seas, lakes and ice caps
+    sink (a sea polygon floods the skerries and creeps onto the land).
+    The consumers -- compose.draw_polys and patterns._poly -- take this
+    format."""
     if layer is None:
         return []
     tr = _xform(layer, to_crs); rect = _rect_geom(extent)
@@ -96,8 +101,13 @@ def extract_polys(layer, to_crs, extent=None):
             continue
         polys = g.asMultiPolygon() if g.isMultipart() else [g.asPolygon()]
         for poly in polys:
-            if poly and len(poly[0]) >= 3:
-                res.append(_arr(poly[0]))
+            if not poly or len(poly[0]) < 3:
+                continue
+            rings = [_arr(poly[0])]
+            for hole in poly[1:]:
+                if hole and len(hole) >= 3:
+                    rings.append(_arr(hole))
+            res.append(rings)
     return res
 
 
@@ -224,6 +234,9 @@ def extract_landcover(layer, to_crs, field, extent=None):
             continue
         polys = g.asMultiPolygon() if g.isMultipart() else [g.asPolygon()]
         for poly in polys:
-            if poly and len(poly[0]) >= 3:
-                items.append(([[(p.x(), p.y()) for p in poly[0]]], kind))
+            if not poly or len(poly[0]) < 3:
+                continue
+            rings = [[(p.x(), p.y()) for p in ring]
+                     for ring in poly if len(ring) >= 3]
+            items.append((rings, kind))          # with holes
     return items, mapping
