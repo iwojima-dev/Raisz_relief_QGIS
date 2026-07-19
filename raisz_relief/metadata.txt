@@ -3,11 +3,11 @@ name=Raisz-style Relief
 qgisMinimumVersion=3.28
 description=Presentation-quality relief rendering from a DEM in the style of Erwin Raisz hand-drawn physiographic maps: two algorithms (hybrid landform and classic oblique hachures) with a shared decoration layer - hypsometric or thematic draped fill, overlay layers for waters, roads, settlements, land cover textures, sheet decoration (frames, graticule ticks, scale bar, compass rose) and old-print emulation.
 version=7.2.4
-author=Scratch_relief
-email=
+author=Maksim Boiko
+email= boandch@gmail.com
 about=The plugin builds presentation-quality physiographic relief graphics from a DEM (Alpha & Winter 1971; Raisz 1931; oblique view with proportional displacement - Ridd 1963). Contour levels are made invisible; each relief point is shifted north proportionally to its height, so the higher the mountain, the taller its profile; fall lines with light-dependent density and hidden-surface removal by a floating horizon form the correct oblique view. Two algorithms: "Landform map" (a hybrid of Mower-style morphometry and hachures at working resolution with variable plains density) and "Classic physiographic" (full resolution, uniform hachuring, memory control with optional strip tiling). A shared decoration layer (all optional): monochrome sepia paper, hypsometric fill from elevation (Patterson, Bartholomew, Peucker, Imhof palettes) or thematic fill colored from the QGIS layer style; the fill is draped over the displaced relief; separate water layers (rivers, lakes, seas, marshes) drawn in ink on paper presets and in blue on colored fills; roads; settlements with labels; land cover textures; large-form shading (flat shadow or anaglyptography engraving); sheet decoration (frames including a checkered map border, graticule tick labels in D°MM', old-style scale bar, compass rose) and old-print emulation (dot screen, paper grain, color misregistration). Vector layers are reprojected and clipped to the DEM extent automatically. Output - PNG, SVG or PDF. Requires numpy, scipy, matplotlib, rasterio, shapely (>=2.0), pyproj and affine -- all bundled with QGIS/OSGeo4W.
-tracker=
-repository=
+tracker= https://github.com/iwojima-dev/Raisz_relief_QGIS/issues
+repository= https://github.com/iwojima-dev/Raisz_relief_QGIS
 category=Raster
 icon=resources/icon.png
 experimental=False
