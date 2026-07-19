@@ -19,6 +19,8 @@ in proportion to its height, and fall lines with light-dependent density
 and hidden-surface removal build the oblique view. The higher the
 mountain, the taller its profile.
 
+![Norge fjords. Landform map (Hammond + Mower + Alpha) in sepia](images/fjord_sepia.png)
+
 Two algorithms share one decoration layer:
 
 * **Landform map (Hammond + Mower + Alpha)** — hybrid: Hammond
@@ -46,6 +48,8 @@ Two algorithms share one decoration layer:
 - Old-print emulation: halftone dot screen, paper grain, color misregistration
 - Canvas rotation 0/90/180/270°, relative scene scaling for gentle terrain
 - Vector export to SVG/PDF
+
+![Fuji region. Landform map (Hammond + Mower + Alpha) in Patersons colormap](images/fuji_clear_paterson_2500px.png)
 
 ## Installation
 
@@ -169,10 +173,12 @@ the authentic panoramic-map effect, not a bug.
 - Turn decoration on gradually — frame, then graticule, then scale bar
   and compass. Everything is off by default so you can judge each addition.
 - Hydrography patterns and land cover textures are expensive on huge
-  polygon sets; test on a small extent first.
+  polygon sets; test on a small extent first.https://github.com/iwojima-dev/Raisz_relief_QGIS/blob/main/README.md
 - **Anaglyptography** works best either *instead of* fall lines (disable
   hachures, keep the framework) or *under* them with small spacing and
   low intensity.
+
+![Glacier national park. Landform map (Hammond + Mower + Alpha) in Anaglyptography and blueprint stylr](images/glacier_anaglypt_2500px.png)
 
 ### Vector output
 
