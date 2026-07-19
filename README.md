@@ -83,13 +83,87 @@ Lambert Conformal Conic for a country-sized sheet. The method measures
 local relief and slopes in meters, so a geographic CRS (EPSG:4326,
 degrees) distorts them badly: one degree of longitude is not one degree
 of latitude anywhere except the equator, and the hachures come out
-stretched. The landform algorithm warns you when the DEM is in degrees.
+stretched. The landform algorithm warns you when the DEM is in degrees; the Classic
+algorithm does not check, so verify the CRS yourself before a long render.
 
-Reproject the DEM first (*Raster → Projections → Warp*), don't rely on
-on-the-fly reprojection — the plugin reads the file, not the canvas.
+### Which CRS, concretely
+
+Where two options are listed, prefer the conformal one when the relief itself
+is the subject: slope and aspect are angular quantities, and a conformal
+projection keeps them honest in every direction. Equal-area projections
+(Albers, LAEA) stretch one axis and squeeze the other by a percent or two,
+which makes the computed slope depend slightly on azimuth — negligible for a
+thematic sheet, visible on a pure relief engraving.
+
+| Scene | Recommended CRS | EPSG |
+|---|---|---|
+| Single region, up to ~6° of longitude | WGS 84 / UTM zone *n*N | 32601–32660 |
+| Same, southern hemisphere | WGS 84 / UTM zone *n*S | 32701–32760 |
+| Europe, single country | ETRS89 / UTM zone 28N–38N | 25828–25838 |
+| Europe, continental sheet | ETRS89-extended / LCC Europe | 3034 |
+| Europe, thematic/statistical sheet | ETRS89-extended / LAEA Europe | 3035 |
+| Contiguous USA | NAD83 / Conus Albers | 5070 |
+| Contiguous USA, conformal alternative | USA Contiguous Lambert Conformal Conic | ESRI:102004 |
+| Canada | NAD83 / Canada Atlas Lambert | 3978 |
+| France | RGF93 / Lambert-93 | 2154 |
+| Great Britain | OSGB36 / British National Grid | 27700 |
+| Iceland | ISN93 / Lambert 1993 | 3057 |
+| Arctic | WGS 84 / NSIDC Polar Stereographic North | 3413 |
+| Antarctica | WGS 84 / Antarctic Polar Stereographic | 3031 |
+
+For a country not listed here, look for its national grid: almost every one is
+a Transverse Mercator or a Lambert Conformal Conic centered on the territory,
+which is exactly what this method wants. Verify any code at
+[epsg.io](https://epsg.io) before relying on it — national grids get
+superseded as datums are re-realized.
+
+**Avoid:**
+
+* **EPSG:4326** (WGS 84 geographic) — degrees, not meters. Slopes and local
+  relief are meaningless, and the sheet is stretched by 1/cos(latitude).
+* **EPSG:3857** (Web Mercator) — metric in name only. It is conformal, so
+  angles survive, but its scale factor is 1/cos(latitude): at 60° N one metre
+  on the ground spans two metres on the map, while the elevations stay in
+  real metres. Every slope is therefore computed about half as steep as it
+  is — and the error grows with latitude (×1.4 at 45°, ×2.9 at 70°). Fine for
+  a basemap, wrong for terrain analysis.
+* **Stitched UTM zones.** A sheet spanning three zones reprojected into one
+  of them accumulates several percent of scale error at the edges and swings
+  grid north noticeably. Define a custom Transverse Mercator or a conic
+  centered on the area instead.
 
 Vector overlays may be in any CRS: they are reprojected to the DEM CRS
 and clipped to its extent automatically.
+
+**Match the vertical units to the horizontal ones.** Elevations must be in
+metres. A DEM in feet on a metric grid reports slopes 3.28 times too steep,
+and the vertical exaggeration you set on top of that becomes meaningless.
+Convert with `gdal_calc` (`--calc="A*0.3048"`) before reprojecting, and keep
+an eye on US sources in particular — many national products ship in feet
+without saying so in the file name.
+
+### Reprojecting the DEM
+
+```bash
+gdalwarp -t_srs EPSG:32631 -tr 45 45 -r cubic -tap \
+         -dstnodata -9999 srtm_raw.tif dem_utm31n.tif
+```
+
+The `-tr 45 45` is the important part: state the pixel size explicitly and
+identically on both axes. Without it, gdalwarp derives the resolution from
+the source and can hand you an anisotropic grid — a DEM at 39 × 95 m will be
+drawn 2.4 times too wide, and no parameter in the plugin can undo that. Check
+the result with `gdalinfo` before rendering: *Pixel Size* must be `(45.000,
+-45.000)`, the two numbers equal apart from the sign.
+
+Use `-r cubic` for elevation (`near` leaves terracing that the hachures will
+faithfully engrave), and set `-dstnodata` explicitly so the gaps are tagged
+rather than left as zeros — the plugin's *Areas without data* modes depend on
+that tag being present.
+
+Pick the pixel size from the sheet you intend to print, not from the source:
+divide the width of the area in meters by the target pixel count. A 300 km
+scene at 6,000 px wants 50 m pixels, whatever the SRTM tile happens to offer.
 
 ### Scene selection
 
@@ -101,6 +175,15 @@ view rotation to bring the plains forward.
 
 ### Resolution
 
+**Which resolution is this about?** The figures below describe the DEM you
+feed in and the sheet you get out — not the *Working resolution* parameter.
+The two coincide for the **Classic** algorithm, which always renders at the
+DEM's own resolution. The **landform** algorithm is different: it resamples
+internally to *Working resolution*, a separate setting with its own ceiling
+of 6,000 px (default 2,000). So "aim for 6,000 px" is advice about your
+source raster; with the landform algorithm you must also raise *Working
+resolution*, or a 6,000 px DEM will still be drawn at 2,000.
+
 **Aim for about 6,000 px on the longer side of the DEM.** This is the
 sweet spot where the engraving reads as line work rather than as noise
 or as coarse scribble:
@@ -110,7 +193,10 @@ or as coarse scribble:
   at A2–A1 sizes and still renders in a few minutes. The progress bar may
   appear to freeze at 40–50%; this is normal.
 - Above ~12,000 px the gain is marginal, while memory and time grow
-  quadratically. Use strip mode (see below) if you go there anyway.
+  quadratically. This ceiling concerns the **Classic** algorithm, which works
+  at the DEM's own resolution; use strip mode (see below) if you go there
+  anyway. The landform algorithm never reaches it — its internal cap is
+  6,000 px.
 
 The **landform algorithm** resamples internally to *Working resolution*
 (default 2,000 px) — raise it to 3,000–4,000 px for a final sheet. The
