@@ -151,10 +151,28 @@ gdalwarp -t_srs EPSG:32631 -tr 45 45 -r cubic -tap \
 
 The `-tr 45 45` is the important part: state the pixel size explicitly and
 identically on both axes. Without it, gdalwarp derives the resolution from
-the source and can hand you an anisotropic grid — a DEM at 39 × 95 m will be
-drawn 2.4 times too wide, and no parameter in the plugin can undo that. Check
-the result with `gdalinfo` before rendering: *Pixel Size* must be `(45.000,
--45.000)`, the two numbers equal apart from the sign.
+the source and can hand you an anisotropic grid. Check the result with
+`gdalinfo`: *Pixel Size* should read `(45.000, -45.000)` — the two numbers
+equal apart from the sign.
+
+**That said, anisotropic pixels are not fatal.** The morphometry is computed
+from the true metric spacing of each axis, so slopes, local relief and the
+landform classification stay correct whatever the cell shape. What changes is
+the drawing: the plugin plots in pixel space with an equal aspect ratio, so a
+DEM at 39 × 95 m comes out stretched 2.4× horizontally. The first sample map
+in this README, *Norge fjords*, was rendered from exactly such a raster — the
+result is perfectly usable as presentation graphics, and the stretch even
+suits a wide coastal panorama.
+
+Two caveats if you go that way deliberately. The scale bar is measured along
+the horizontal axis, so on a stretched sheet it is valid east–west only —
+don't scale north–south distances off it. And the vertical exaggeration you
+set will read differently than on a square grid, since the apparent height of
+the relief is judged against a horizontally inflated width.
+
+So: square pixels are the safe default and the right choice when the sheet
+should be geometrically faithful. A rectangular cell is a legitimate stylistic
+option — just make it a decision rather than an accident.
 
 Use `-r cubic` for elevation (`near` leaves terracing that the hachures will
 faithfully engrave), and set `-dstnodata` explicitly so the gaps are tagged
