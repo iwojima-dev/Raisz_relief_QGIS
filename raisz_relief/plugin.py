@@ -21,7 +21,7 @@ import os
 
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction
-from qgis.core import QgsApplication
+from qgis.core import QgsApplication, QgsMessageLog
 
 from .provider import RaiszReliefProvider
 
@@ -58,8 +58,8 @@ class RaiszReliefPlugin:
             try:
                 from qgis.utils import iface as _iface
                 _iface.actionShowProcessingToolbox().trigger()
-            except Exception:
-                pass
+            except Exception as e:
+                QgsMessageLog.logMessage(str(e), "RaiszRelief")
 
     def unload(self):
         if self.provider is not None:

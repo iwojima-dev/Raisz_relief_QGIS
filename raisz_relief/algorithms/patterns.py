@@ -34,6 +34,7 @@ import numpy as np
 
 from .grid import as_rings
 
+from qgis.core import QgsMessageLog
 
 def _poly(ring):
     """Rings [outer, hole1, ...] (or a single ring) -> Polygon.
@@ -136,8 +137,8 @@ def coastal_vignette(rings, step, n=3, extent=None, min_island=2.0,
             if len(keep_h) != len(poly.interiors):
                 try:
                     poly = Polygon(poly.exterior, keep_h)
-                except Exception:
-                    pass
+                except Exception as e:
+                    QgsMessageLog.logMessage(str(e), "RaiszRelief")
                 if poly.is_empty:
                     continue
         for k in range(1, n + 1):

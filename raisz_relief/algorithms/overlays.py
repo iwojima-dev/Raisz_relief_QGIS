@@ -28,7 +28,7 @@ import numpy as np
 
 from qgis.core import (
     QgsCoordinateTransform, QgsProject, QgsRenderContext,
-    QgsGeometry, QgsRectangle,
+    QgsGeometry, QgsRectangle, QgsMessageLog,
 )
 
 
@@ -160,8 +160,8 @@ def extract_thematic(layer, to_crs, extent=None, default_color="#cccccc"):
                     syms = renderer.symbolsForFeature(f, ctx)
                     if syms:
                         color = syms[0].color().name()
-                except Exception:
-                    pass
+                except Exception as e:
+                    QgsMessageLog.logMessage(str(e), "RaiszRelief")
             g = _prep(f.geometry(), tr, rect)
             if g is None:
                 continue
@@ -175,8 +175,8 @@ def extract_thematic(layer, to_crs, extent=None, default_color="#cccccc"):
         if renderer is not None:
             try:
                 renderer.stopRender(ctx)
-            except Exception:
-                pass
+            except Exception as e:
+                QgsMessageLog.logMessage(str(e), "RaiszRelief")
     return res
 
 
