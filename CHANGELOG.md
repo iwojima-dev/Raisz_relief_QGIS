@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## 7.2.5 — Decoration micro-fixes (2026-07-20)
+### Fixed
+- Added proper exception logging instead of silently ignoring errors,
+  resolving static-analysis warnings from the QGIS plugin security scanner.
+
+### Changed
+- Bumped plugin version for re-submission to the QGIS Plugin Repository.
+
 ## 7.2.4 — Decoration micro-fixes (2026-07-19)
 
 **Compass rose and scale bar halved.** Compass: main ray
