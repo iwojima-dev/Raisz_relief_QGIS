@@ -2,11 +2,62 @@
 
 All notable changes to this project are documented here.
 
-## 7.2.5 — Bumped plugin version for re-submission to the QGIS Plugin Repository. (2026-07-20)
+## 7.2.6 — Qt6 compatibility; settlement label font and size (2026-07-20)
 
-### Fixed
-- Added proper exception logging instead of silently ignoring errors,
-  resolving static-analysis warnings from the QGIS plugin security scanner.
+### Qt6 / PyQt6 compatibility
+
+QGIS 3.40+ may be built on Qt6, where PyQt6 requires fully qualified
+(scoped) enums. The code had 25 old-form references
+(`QgsProcessingParameterNumber.Double`, `…Definition.FlagAdvanced`,
+`QgsProcessing.TypeVectorPolygon`, etc.) across four files — on Qt6 they
+raised `AttributeError` right in `initAlgorithm`.
+
+- The minimum QGIS version is raised from 3.28 to **3.40**, where the
+  scoped forms exist natively, so no Qt5 `try/except` fallback is needed;
+  `supportsQt6=True` is declared in `metadata.txt`.
+- `_base.py` defines one set of aliases (`NUM_DOUBLE`, `NUM_INT`,
+  `FLAG_ADVANCED`, `SRC_POLYGON/LINE/POINT`); the algorithms import
+  `NUM_DOUBLE as D, NUM_INT as I`, keeping the scoped form in one place.
+- The three `TypeVector*` values do not merely gain a prefix in Qt6 —
+  they move from `QgsProcessing` to `Qgis.ProcessingSourceType`; handled,
+  and the now-unused `QgsProcessing` import removed.
+
+### Settlement label font and size
+
+The label font size was a constant in `theme.py` (`label_size=9`) —
+absolute points — while all sheet decoration is sized as a fraction of
+the margin via `sheet._pt()`. Points-per-data-pixel do not depend on
+scene size (~0.74), so coordinate labels grow with the canvas but place
+names do not: on a scene twice as wide the lag is already threefold.
+
+Two new parameters in the shared decoration group (both algorithms):
+
+- **Settlement label font** — an enum of generic matplotlib families
+  (default, serif, sans-serif, monospace, cursive, fantasy), chosen over
+  named typefaces so they resolve on any system.
+- **Settlement label and marker size** — a multiplier, 1.0 = auto by
+  sheet, range 0.2–5.0. A multiplier rather than points, so the value
+  need not be re-tuned when the scene changes.
+
+`sheet.settle_style()` computes the sizes from the margin (base
+`0.11·margin`, 7 pt floor); the marker area scales as the square of the
+coefficient, so the marker/label ratio is preserved. At 1.0 the fjord
+scene renders 8.81 pt vs the former 9 — visually unchanged by default,
+but now it scales.
+
+Also fixed along the way: the settlement marker edge was hard-coded white
+(`edgecolors="white"`), while the label halo always came from the theme;
+on sepia, blueprint and similar presets the white edge stood out. It now
+uses the same halo as the label. The label offset (fixed 3 px) and the
+halo/edge widths now scale with the font size too.
+
+## 7.2.5 — Technical re-release for the QGIS Plugin Repository (2026-07-20)
+
+A narrow fix for re-submission to the QGIS Plugin Repository, published
+separately. Proper exception logging was added instead of silently
+swallowing errors (`except: pass`), clearing the static-analysis warnings
+from the plugin security scanner (Bandit B110). No functional changes;
+everything from 7.2.4 onward is in 7.2.6.
 
 ## 7.2.4 — Decoration micro-fixes (2026-07-19)
 
