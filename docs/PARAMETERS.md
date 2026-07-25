@@ -92,6 +92,8 @@ the hachures but below area waters, clipped behind mountains.
 | Auto-sea from DEM | off | Builds a water polygon at the given level directly from the DEM; island holes preserved. |
 | Sea level, m | 0 | Threshold of the auto-sea. |
 | Areas without data (nodata) shown as | Plain | What to do where the DEM has no data. **Plain** fills with the nearest elevations (previous behaviour), which reads as a flat plain. **Sea** floods the gap at sea level and adds it to the sea polygons. **Paper** leaves it undrawn — no fill, no strokes, no framework. In every mode the nodata border counts as an artificial edge, so no coastal vignette runs along it. |
+| Settlement label font | Default | Font family for place names: Default, Serif, Sans-serif, Monospace, Cursive, or Fantasy. Generic matplotlib families are used so they resolve on any system. |
+| Settlement label and marker size | 1.0 | Multiplier over the automatic, sheet-relative size. The label scales with the sheet instead of being a fixed point value, so place names no longer shrink on large DEMs; the marker, its offset and halo scale with it. Range 0.2–5.0. |
 | Hydrography patterns | off | Coastal vignette along true shores, hatching in lakes, tuft symbols in marshes. Polygon holes are honoured: islands keep their own shore band, and hatching stays off them. |
 
 ---
@@ -100,7 +102,7 @@ the hachures but below area waters, clipped behind mountains.
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| Sheet: frame | None | Single, Double thin, Thick-thin (classic), or **Map border** — a narrow checkered band of black-and-white degree fractions along the outer frame. Relief displaced upward overlaps the top frame (authentic panoramic effect). |
+| Sheet: frame | None | Single, Double thin, Thick-thin (classic), or **Map border** — a narrow checkered band of black-and-white degree fractions along the outer frame. Where relief displaced upward juts past the top edge, the top frame line is broken along its silhouette rather than drawn over it. |
 | Sheet: graticule ticks with labels (D°MM′) | off | Any CRS via WGS84; grid step 15′ or coarser (seconds always zero, omitted); at most 3 labels per side, overlap-checked; hemispheres N/S/E/W. |
 | Sheet: scale bar (old style) | off | Four black-and-white segments, lower-left; nice-number length via WGS84 haversine — correct along the sheet horizontal. |
 | Sheet: compass rose / north arrow | None | Cartouche in the upper-right pointing to TRUE north computed from the CRS — honest on rotated canvases and converging projections. |

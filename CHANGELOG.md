@@ -2,6 +2,251 @@
 
 All notable changes to this project are documented here.
 
+## 7.3.0 — Relative mode: draw the form, do not stretch it (2026-07-25)
+
+Relative scale (7.2.0) scaled only the final displacement (`disp *= k`):
+the stroke engine -- slopes, width, thresholds, fall-line length, contour
+step -- was still computed from the REAL gentle relief. Few thin strokes
+were born and then stretched over the inflated height. The result was a
+"mess".
+
+### z_amp: amplify the relief BEFORE the engine
+
+Instead of `disp *= k` an amplified surface `zg = base + relief*lift` is
+built, and slopes, light, contours, stroke length and disp are computed
+from it. disp from `relief*lift` matches the old `disp *= k` (disp is
+linear in relief) -- the displacement geometry is unchanged; what changed
+is that the engine now "sees" a mountain: steep slopes -> strokes pass the
+thresholds and get a normal width; contours over the zg range -> dense
+belts; light is "mountainous". The hypsometric fill is coloured by the
+REAL z.
+
+### Selector: raise sharp small forms, not everything
+
+A uniform `k` pulled up all micro-relief and pixel DEM noise -- especially
+on the classic host, which has no Hammond plain suppression. New
+`grid.steep_weight`: weight `w in [w_min, 1]` from the SHARPNESS OF A
+RESIDUAL (`smoothed-from-noise minus smoothed-from-broad-forms`, then its
+steepness). The lift is selective, `lift = 1 + (k_amp-1)*w`:
+
+- small steep forms (scarps, coastal cliffs) -> `w~1`, full lift;
+- plains, broad gentle hills, the trend -> `w~w_min` (0.12), a little;
+- pixel noise is removed by the narrow smoothing and does not go up.
+
+The target is normalized over the steep population (`w>=0.5`), falling
+back to all relief.
+
+### Local contour interval
+
+`rel_interval` took the global `(zmax-zmin)/N`; with a large regional
+trend and small local relief the interval inflated -> `drop_limit` large
+-> long stretched strokes. The new `rel_interval_local` divides the p90
+of the local (amplified) relief -- belts cut the forms themselves.
+
+### Slope normalization folded into the mode
+
+The separate "relative slopes" flag left a broken half-state (scale on,
+slopes off -> strokes cut by the absolute threshold on gentle terrain).
+Slope normalization now switches on automatically with `rel_scale`; the
+flag is removed from both algorithms' UI. It is also the rail against
+"solid black" at large k (p95 slope -> max width).
+
+### Strip mode
+
+`k_amp` and the selector are computed once on the downsampled pass (a
+global factor -- otherwise strips would split at the seams); the strips
+get it as a scalar. Consistency between the downsampled grid (fill/mask)
+and the strips (hachures) is kept the same way as `base_ds`: the
+selector's `sigma_broad = base_scale_px`, and the downsampled pass gets
+the already scaled `base_ds`, so both grids measure one ground band of
+forms.
+
+### Diazotype — from a real scan
+
+The Diazotype paper/ink preset now matches a real diazo-print scan: warm
+ochre paper `#e9bc8e` and a dark plum ink `#7a4859` (R>B>G), instead of
+the former pale pink and lilac.
+
+### Limit of the approach
+
+The relative mode scales a continuous elevation field. A sharp two-cell
+scarp stays a two-cell scarp, just steeper -- a "drawn" cliff symbol
+(face, brow, cast shadow) cannot be produced by amplification. This is a
+conscious ceiling; `steep_weight` already localizes the scarps -- a
+foundation for the pictographic landform symbols to come.
+
+### Change map (for the port)
+
+| File | What |
+|---|---|
+| `grid.py` | new `steep_weight()` and `rel_interval_local()` |
+| `classic_core.py` | rel block -> z_amp + selector; slopes/light/contours/trace from `zg`; fill by real `z`; signature without `rel_slopes` |
+| `physio_core.py` | same; disp keeps `*w_relief`, colour by `z0` |
+| `classic_striped.py` | `_morphometry` rewritten (z_amp + selector, `k_amp`); downsampled pass gives the global `k_amp`; levels/interval/trace from `zg` |
+| `classic_algorithm.py`, `physiographic_algorithm.py` | `REL_SLOPES` parameter removed |
+| `_base.py` | Diazotype preset colours from the scan |
+| `metadata.txt` | version 7.3.0; qgisMaximumVersion=4.99 |
+
+## 7.2.9 — True water clipping behind mountains (2026-07-24)
+
+7.2.8 left a compromise: a polygon wholly behind a ridge was skipped (no
+visible node), but a partially occluded one still came out whole -- there
+was no way to clip a vector fill by a raster mask.
+
+The invisible zones are now vectorized and subtracted from the waters.
+
+- `grid.hidden_polygons` builds rings of the invisible zones the same
+  +-1 array / zero-level contour way as `nodata_polygons`, so visible
+  islets inside an occluded area come straight through as holes.
+- `compose.hidden_geometry` merges them into one geometry ONCE per render
+  (the expensive part).
+- `compose.clip_polys` subtracts it via `shapely.difference` from seas,
+  lakes, marshes, settlement polygons and auto-sea, returning the same
+  "rings with holes" format `draw_polys` understands.
+
+Patterns (vignette, lake hatch, marsh tufts) are still computed on the
+ORIGINAL polygons and cut as LINES by visibility -- otherwise the vignette
+would run along the clip line and outline the mountain silhouette,
+mistaking it for a shore. Pockets smaller than `min_cells=64` (~8x8 px)
+are dropped. The old "no node visible" test is removed -- clipping
+subsumes it.
+
+Measured on the fjord scene: geometry growth ~+4% points (not a saw),
+holes 346 -> 338 (8 islands wholly inside the hidden zone vanished).
+
+### Change map (for the port)
+
+| File | What |
+|---|---|
+| `grid.py` | `hidden_polygons()` |
+| `compose.py` | `hidden_geometry()`, `clip_polys()`; `draw_area_waters(hidden=...)` clips the fill; `_poly_hidden` removed |
+| `classic_core.py`, `physio_core.py`, `classic_striped.py` | `hidden = hidden_geometry(...)` -> into `draw_area_waters` |
+
+## 7.2.8 — Decoration behind mountains (2026-07-24)
+
+Rivers, roads, settlements and area waters were drawn on top of the
+relief even where the oblique view should hide them behind a ridge.
+
+The hidden-line machinery (the `vis` floating-horizon mask) has existed
+since July and works in the ordinary path: `classic_core` and
+`physio_core` pass `vis` into `draw_infrastructure`. But there were two
+independent gaps.
+
+### Gap 1 — strip mode did no clipping at all
+
+`classic_striped` had **`vis=None`** in three consecutive calls: land
+cover, area waters, infrastructure. Every large scene goes through strip
+mode, which is exactly where the defect shows.
+
+Not an oversight: in strip mode a full-sheet mask does not exist — it is
+computed per strip and discarded, otherwise the whole point of the mode
+is lost. The decoration, meanwhile, is drawn at the end over the
+downsampled `disp_ds`. And while `to_screen` rescales coordinates into
+the downsampled grid via `_DISP_SCALE`, `_vis_at` did not — it indexed
+the mask directly. A downsampled mask could not be passed at all, so the
+stub remained.
+
+Fixed:
+
+- `compose._vis_at` now honours `_DISP_SCALE`, rescaling full-sheet
+  coordinates into the mask grid exactly as `to_screen` does. In the
+  ordinary path (`_DISP_SCALE is None`) behaviour is unchanged.
+- `classic_striped` builds a downsampled visibility mask from `disp_ds`
+  with the same floating-horizon formula used for the strips, and passes
+  it to all three calls. In nodata mode "paper" the mask is additionally
+  gated by `valid_ds`.
+
+### Gap 2 — area waters were never clipped, in any mode
+
+`draw_area_waters` had no `vis` parameter at all, so lakes, seas,
+marshes, settlement polygons and the hydrography patterns (vignette,
+hatching, tufts) were always drawn over the mountains, in the ordinary
+path too.
+
+Fixed: the function takes `vis`. Pattern lines are cut per segment via
+`draw_map_segments(vis=…)`, like every other line.
+
+For polygons a `_poly_hidden` test was added: the object is skipped when
+**none** of its nodes is visible, i.e. it sits wholly behind a ridge.
+Partially occluded ones are kept whole — there is no way to clip a
+vector fill by an arbitrary raster mask, and cutting one in half is
+worse than leaving it (a lake in a valley is almost always visible along
+at least one edge).
+
+### Verification
+
+Synthetic scene: a ridge across the sheet, 40 px displacement. A point
+behind the ridge is hidden, one in front is visible — both in the
+ordinary path and in strip mode with a half-resolution mask, confirming
+the coordinate rescaling is correct. A polygon wholly behind the ridge
+is dropped; one in front is kept.
+
+## 7.2.7 — Vector export and a PROJ crash (2026-07-24)
+
+### The process crashed while drawing sheet decoration
+
+Symptom: QGIS went down entirely with `Windows fatal exception: access
+violation` in `sheet._lonlat_fn` → `pyproj.CRS.from_user_input` → PROJ
+`DatabaseContext::toWGS84AutocorrectWrongValues`. Not a Python exception
+— a native crash that `try/except` cannot catch.
+
+Cause: PROJ contexts are not thread-safe (one context, one thread). A
+Processing algorithm runs in a worker thread
+(`QgsProcessingAlgRunnerTask::run`), while QGIS on the main thread also
+uses PROJ — canvas redraws, dialogs, CRS lookups. pyproj and QGIS share
+the same loaded PROJ library and its database cache, so creating a CRS
+from the worker thread can land in memory another thread is using.
+
+Why it showed up so rarely: `_lonlat_fn` is called only for the map
+border (frame=4), graticule ticks or the scale bar — with plain frames
+pyproj is never even imported. It also needs the main thread to touch
+PROJ at that exact moment, so the same sheet could render fine once and
+crash QGIS on the next run.
+
+Fixed: inside QGIS the sheet decoration now uses its own transformer —
+`QgsCoordinateReferenceSystem` + `QgsCoordinateTransform` with a local
+`QgsCoordinateTransformContext`, without reaching for `QgsProject` from
+a foreign thread. pyproj remains a fallback for use outside QGIS
+(`except ImportError`). Both call sites were converted: the degree
+border with ticks, and the true-north vector for the compass.
+
+Checked against the previous result: `_lonlat_fn` over 500 points
+differs by exactly zero, the north vector matches to six decimals, and
+4000 points take 9 ms.
+
+### PDF twice as slow as PNG on identical geometry
+
+Measured on a 4965×1836 scene: PNG 385 s, PDF 925 s, identical
+parameters. The log showed 2,598,440 stroke segments.
+
+Cause: `displace_clip` emitted **a separate two-point segment for every
+edge** of a fall line. A stroke is traced through 10–40 points, so
+instead of one polyline it produced that many independent paths. Agg
+copes — rasterization cost scales with area, not object count — but
+vector backends pay a **fixed cost per path**, hence the extra 540 s ≈
+0.2 ms × 2.6M.
+
+Fixed: contiguous visible points are merged into a single polyline. The
+geometry is unchanged — a check over 2000 random visibility patterns
+found **0 discrepancies** between the edges of the new polylines and the
+old pairs. As a side effect the line work is cleaner: a continuous path
+joins properly instead of showing butt caps at every bend.
+
+One subtlety about the pen: with `hand_jitter > 0` the width varies
+**along** the stroke, while a path has a single width. So merging is
+enabled only without jitter; with jitter the polylines still fall back
+to edges and the pen-pressure simulation is fully preserved.
+
+### Also
+
+- A progress tick with the path count was added before `savefig`:
+  writing a PDF no longer looks like a freeze on the decoration step
+  (there was no message between the two, so a multi-minute write showed
+  as "96% Decoration").
+- **Note:** the `fall_segs` statistic now counts paths, not edges. The
+  log will show a number 10–15× smaller than 2,598,440 — no strokes were
+  lost, the unit changed.
+
 ## 7.2.6 — Qt6 compatibility; settlement label font and size (2026-07-20)
 
 ### Qt6 / PyQt6 compatibility
