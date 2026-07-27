@@ -277,7 +277,7 @@ the authentic panoramic-map effect, not a bug.
 - Turn decoration on gradually — frame, then graticule, then scale bar
   and compass. Everything is off by default so you can judge each addition.
 - Hydrography patterns and land cover textures are expensive on huge
-  polygon sets; test on a small extent first.https://github.com/iwojima-dev/Raisz_relief_QGIS/blob/main/README.md
+  polygon sets; test on a small extent first.
 - **Anaglyptography** works best either *instead of* fall lines (disable
   hachures, keep the framework) or *under* them with small spacing and
   low intensity.
