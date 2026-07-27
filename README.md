@@ -7,7 +7,7 @@ sheet. The output is a *picture*, not a georeferenced raster: PNG, SVG or
 PDF ready for print or for editing in vector software.
 
 ![License](https://img.shields.io/badge/license-GPLv3-blue)
-![QGIS](https://img.shields.io/badge/QGIS-3.28%2B-green)
+![QGIS](https://img.shields.io/badge/QGIS-3.40%2B-green)
 
 ---
 
