@@ -36,6 +36,14 @@ description of the technique rather than only at a desired effect.
   `physio_core` and `classic_striped`. In strip mode, per-scene
   coefficients must be computed once on the downsampled pass and passed
   into the strips, or the strips will disagree at the seams.
+- Adding or renaming a parameter means updating `ui_groups.py` too: the
+  group descriptions there are a copy of the declarations in `_base.py`,
+  and a stale copy makes the dialog show one thing while the algorithm
+  receives another. `ui_groups.check_names(alg)` reports the difference.
+- Thresholds that must survive a change of data source belong in units
+  that do not depend on resolution. The plugin is used with open DEMs at
+  30 m, 90 m and coarser, where the contour interval grows with the
+  pixel: a threshold stated in pixels or metres will miss.
 - Check that the file still compiles: `python -m py_compile <file>`.
 - Test with at least one gentle scene and one mountainous scene, and with
   strip mode enabled if you touched the classic core.
@@ -59,6 +67,9 @@ raisz_relief/
     compose.py                  overlay drawing primitives
     overlays.py                 vector extraction (QGIS side)
     patterns.py                 hydrography and land cover textures
+    watercolor.py               watercolour styling of the fill
+    ui_groups.py                grouped parameter dialogs (Qt only)
+    ui_binding.py               wiring those dialogs into Processing
     sheet.py                    frames, graticule, scale bar, compass
     print_fx.py                 dot screen, grain, misregistration
     engrave.py                  anaglyptography
