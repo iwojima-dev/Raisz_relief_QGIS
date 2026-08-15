@@ -2,125 +2,164 @@
 
 All notable changes to this project are documented here.
 
-## 7.3.0 — Relative mode: draw the form, do not stretch it (2026-07-25)
+## 7.7.0 — Grouped parameter dialogs (2026-08-14)
 
-Relative scale (7.2.0) scaled only the final displacement (`disp *= k`):
-the stroke engine -- slopes, width, thresholds, fall-line length, contour
-step -- was still computed from the REAL gentle relief. Few thin strokes
-were born and then stretched over the inflated height. The result was a
-"mess".
+The algorithm dialog is decluttered: 75 of the 85 parameters move into
+five windows of their own, opened by "Configure..." buttons.
 
-### z_amp: amplify the relief BEFORE the engine
-
-Instead of `disp *= k` an amplified surface `zg = base + relief*lift` is
-built, and slopes, light, contours, stroke length and disp are computed
-from it. disp from `relief*lift` matches the old `disp *= k` (disp is
-linear in relief) -- the displacement geometry is unchanged; what changed
-is that the engine now "sees" a mountain: steep slopes -> strokes pass the
-thresholds and get a normal width; contours over the zg range -> dense
-belts; light is "mountainous". The hypsometric fill is coloured by the
-REAL z.
-
-### Selector: raise sharp small forms, not everything
-
-A uniform `k` pulled up all micro-relief and pixel DEM noise -- especially
-on the classic host, which has no Hammond plain suppression. New
-`grid.steep_weight`: weight `w in [w_min, 1]` from the SHARPNESS OF A
-RESIDUAL (`smoothed-from-noise minus smoothed-from-broad-forms`, then its
-steepness). The lift is selective, `lift = 1 + (k_amp-1)*w`:
-
-- small steep forms (scarps, coastal cliffs) -> `w~1`, full lift;
-- plains, broad gentle hills, the trend -> `w~w_min` (0.12), a little;
-- pixel noise is removed by the narrow smoothing and does not go up.
-
-The target is normalized over the steep population (`w>=0.5`), falling
-back to all relief.
-
-### Local contour interval
-
-`rel_interval` took the global `(zmax-zmin)/N`; with a large regional
-trend and small local relief the interval inflated -> `drop_limit` large
--> long stretched strokes. The new `rel_interval_local` divides the p90
-of the local (amplified) relief -- belts cut the forms themselves.
-
-### Slope normalization folded into the mode
-
-The separate "relative slopes" flag left a broken half-state (scale on,
-slopes off -> strokes cut by the absolute threshold on gentle terrain).
-Slope normalization now switches on automatically with `rel_scale`; the
-flag is removed from both algorithms' UI. It is also the rail against
-"solid black" at large k (p95 slope -> max width).
-
-### Strip mode
-
-`k_amp` and the selector are computed once on the downsampled pass (a
-global factor -- otherwise strips would split at the seams); the strips
-get it as a scalar. Consistency between the downsampled grid (fill/mask)
-and the strips (hachures) is kept the same way as `base_ds`: the
-selector's `sigma_broad = base_scale_px`, and the downsampled pass gets
-the already scaled `base_ds`, so both grids measure one ground band of
-forms.
-
-### Diazotype — from a real scan
-
-The Diazotype paper/ink preset now matches a real diazo-print scan: warm
-ochre paper `#e9bc8e` and a dark plum ink `#7a4859` (R>B>G), instead of
-the former pale pink and lilac.
-
-### Limit of the approach
-
-The relative mode scales a continuous elevation field. A sharp two-cell
-scarp stays a two-cell scarp, just steeper -- a "drawn" cliff symbol
-(face, brow, cast shadow) cannot be produced by amplification. This is a
-conscious ceiling; `steep_weight` already localizes the scarps -- a
-foundation for the pictographic landform symbols to come.
-
-### Change map (for the port)
-
-| File | What |
+| Group | Fields |
 |---|---|
-| `grid.py` | new `steep_weight()` and `rel_interval_local()` |
-| `classic_core.py` | rel block -> z_amp + selector; slopes/light/contours/trace from `zg`; fill by real `z`; signature without `rel_slopes` |
-| `physio_core.py` | same; disp keeps `*w_relief`, colour by `z0` |
-| `classic_striped.py` | `_morphometry` rewritten (z_amp + selector, `k_amp`); downsampled pass gives the global `k_amp`; levels/interval/trace from `zg` |
-| `classic_algorithm.py`, `physiographic_algorithm.py` | `REL_SLOPES` parameter removed |
-| `_base.py` | Diazotype preset colours from the scan |
-| `metadata.txt` | version 7.3.0; qgisMaximumVersion=4.99 |
+| Strokes and light | 15 |
+| Plains and Hammond classification | 16 |
+| Fill, paper and shading | 14 |
+| Decoration layers, waters and labels | 21 |
+| Sheet decoration and print | 9 |
 
-## 7.2.9 — True water clipping behind mountains (2026-07-24)
+The main panel keeps the DEM, contour interval, working size, DPI, output
+and the scene view settings — angle, azimuth, vertical exaggeration, local
+base, smoothing, relative mode, and for the classic algorithm strip tiling
+and the memory cap. Those are tuned per DEM rather than chosen once.
 
-7.2.8 left a compromise: a polygon wholly behind a ridge was skipped (no
-visible node), but a partially occluded one still came out whole -- there
-was no way to clip a vector fill by a raster mask.
+Next to each button a summary line shows what differs from the defaults;
+the same summary is written into the help panel on the right.
 
-The invisible zones are now vectorized and subtracted from the waters.
+**Existing parameters are unchanged.** Rather than one composite
+parameter, a service button parameter per group edits the values of the
+ordinary fields. Batch mode, the graphical modeler and calls from scripts
+keep seeing ordinary parameters and keep working; the fields are hidden
+only in the standard dialog.
 
-- `grid.hidden_polygons` builds rings of the invisible zones the same
-  +-1 array / zero-level contour way as `nodata_polygons`, so visible
-  islets inside an occluded area come straight through as holes.
-- `compose.hidden_geometry` merges them into one geometry ONCE per render
-  (the expensive part).
-- `compose.clip_polys` subtracts it via `shapely.difference` from seas,
-  lakes, marshes, settlement polygons and auto-sea, returning the same
-  "rings with holes" format `draw_polys` understands.
+Fields absent from a given algorithm are not shown — the classic and
+landform algorithms have different parameter sets.
 
-Patterns (vignette, lake hatch, marsh tufts) are still computed on the
-ORIGINAL polygons and cut as LINES by visibility -- otherwise the vignette
-would run along the clip line and outline the mountain silhouette,
-mistaking it for a shore. Pockets smaller than `min_cells=64` (~8x8 px)
-are dropped. The old "no node visible" test is removed -- clipping
-subsumes it.
+Setting `HIDE_ORIGINALS = False` at the top of `ui_binding.py` restores
+the previous look: the buttons stay, the original fields are not hidden.
 
-Measured on the fjord scene: geometry growth ~+4% points (not a saw),
-holes 346 -> 338 (8 islands wholly inside the hidden zone vanished).
+## 7.6.1 — Watercolour fill (2026-08-12)
 
-### Change map (for the port)
+Optional watercolour styling of the fill, off by default: one strength
+parameter in the advanced block, and it needs a fill to be enabled.
 
-| File | What |
-|---|---|
-| `grid.py` | `hidden_polygons()` |
-| `compose.py` | `hidden_geometry()`, `clip_polys()`; `draw_area_waters(hidden=...)` clips the fill; `_poly_hidden` removed |
-| `classic_core.py`, `physio_core.py`, `classic_striped.py` | `hidden = hidden_geometry(...)` -> into `draw_area_waters` |
+Paper grain, a wet edge along colour boundaries and a slight wobble of
+those boundaries are applied to the fill in plan view, before it is
+draped over the relief -- so the texture stays with the colour instead of
+drifting across the hachuring.
+
+Land cover and waters receive glazes laid by Kubelka-Munk rather than
+alpha blending. A thin layer passes light down to the substrate and back,
+so forest over ochre and forest over green come out as different hues,
+which alpha blending cannot do. Each pigment is defined by how a unit
+layer looks on white paper and over black; K and S follow from that pair,
+and no spectral measurements are needed. The difference between the two
+swatches is what sets the hiding power.
+
+Area waters are watercoloured as a layer of their own, denser at the
+shore and lighter towards the middle of large bodies. The shoreline
+stroke, the coastal vignette, lake hatching and marsh tufts are unchanged,
+and so are the land cover symbols: the wash sits *under* the relief, the
+way a glaze sits under a pen drawing.
+
+Method after Bousseau et al. (NPAR 2006) for the stylisation and Curtis
+et al. (SIGGRAPH 1997) for the pigment model.
+
+## 7.5.0 — Cast shadow and scene diagnostics (2026-08-08)
+
+Ground hidden from the sun by a neighbouring ridge is now darkened.
+Diffuse illumination alone could not express this: a north-facing slope is
+always dark, but the shadow of a ridge falls on lit ground as well.
+Azimuth and altitude come from the existing light parameters; the strength
+is a new parameter, on by default at half strength. Shadow length matches
+the analytic `H / tan(alt)` to within 5%.
+
+The log now opens with a scene diagnostic: resolution and extent,
+elevation range and percentiles, median and P90 slope, the share of the
+area below the stroke threshold, and the contour bench spacing. Hints
+follow when a value falls outside a sensible range -- bench spacing too
+tight or too wide for the chosen contour interval, a mostly gentle scene,
+too small an elevation range.
+
+## 7.4.0 — Stroke engine (2026-08-08)
+
+Three long-standing artefacts of the hachuring, each with its own strength
+parameter in the advanced block.
+
+**Blots along valley floors.** A stroke now stops where flow lines
+converge closer than the stroke spacing. The measure is the divergence of
+the unit fall vector -- the very direction the tracing follows -- which is
+a direct measure of two neighbouring strokes about to merge, not an
+indirect valley indicator. In the same zone the shade-driven
+densification, extra width and higher opacity are damped: a thalweg is
+shaded and concave at once, so all three used to pile up in one place.
+
+**Long strokes on gentle ground.** The coefficient now scales the descent
+at which a stroke breaks, which is what actually sets stroke length, so
+the effect holds across the whole slope range. On gentle ground a stroke
+becomes a short mark instead of a scratch across empty paper.
+
+**Stray strokes.** Thinning is by how many distinct contour levels the
+hachuring around a stroke describes. A stroke on a single contour depicts
+no form; sparse but honest hachuring on a gentle swell still crosses
+several levels. The measure does not depend on DEM resolution, so one
+setting works for 30 m, 90 m and coarser open elevation data.
+
+All three work in every rendering path. In strip tiling the thinning runs
+once over all strips, so strokes at a seam are not cut for want of
+neighbours in the adjacent strip.
+
+## 7.3.1 — Thematic lines and styling from layer styles (2026-07-25)
+
+Two additions around taking colour from the QGIS layer style.
+
+**Thematic line layer.** A new line input, drawn above the hachuring in
+the colour, width and dash pattern of the layer style -- per feature and
+under any renderer -- and clipped where the terrain hides it, the same
+treatment roads already get. The style is always used for this layer,
+regardless of the checkbox below.
+
+**Styling from layer styles.** A single checkbox, off by default, so
+colours keep coming from the paper/fill theme as before. With it on, the
+colour of area waters (seas, lakes, marshes) and of land cover (forest,
+sand, ice, scrub, grassland) is taken from those layers' own styles;
+categorized and graduated renderers are reduced to their first symbol.
+
+The principle is that the tool stays neutral and does not police taste --
+pink rivers on a blueprint preset are a deliberate choice by whoever ticks
+the box -- while the default protects anyone who leaves it alone. Our own
+graphics are kept in every case: the coastal vignette, lake hatching,
+marsh tufts and land cover textures stay, they are simply recoloured.
+Where a layer is missing or carries no colour, the theme colour remains.
+
+## 7.3.0 — Relative mode reworked (2026-07-25)
+
+Relative mode is meant for gentle scenes -- low hills, plateaus, low but
+steep coastal cliffs -- where absolute displacement leaves the drawing
+almost flat. The previous version stretched the finished drawing, which
+looked poor.
+
+Now the relief is amplified *before* the hachures are drawn, so slopes,
+contour density and stroke weight respond to it and the scene is drawn
+like a mountain rather than a stretched plain. The amplification is
+selective: small steep forms (scarps, coastal cliffs) are raised, while
+plains, broad gentle hills and DEM noise stay low. Contour spacing now
+follows the local relief instead of the full elevation range.
+
+The separate "relative slopes" option is gone -- slope handling is folded
+into relative mode. Relative mode now works in every path, including strip
+tiling of large sheets. The hypsometric fill keeps the true elevation
+colours.
+
+Also: the Diazotype paper/ink preset was corrected to match a real
+diazo-print scan (warm ochre paper, dark plum line).
+
+## 7.2.9 — Waters clipped behind mountains (2026-07-24)
+
+Area waters (lakes, seas, marshes, settlement polygons) are now correctly
+hidden where the oblique view puts them behind a ridge. Previously a
+partially occluded polygon was drawn whole, so a bay behind the middle of
+a ridge spilled out in front of the mountain. It now gets a real gap, and
+a water edge peeking from behind a crest shows only its visible part.
+Coastal vignettes, lake hatching and marsh tufts follow the visible part
+too.
 
 ## 7.2.8 — Decoration behind mountains (2026-07-24)
 
