@@ -16,6 +16,32 @@ matplotlib, rasterio, shapely, pyproj.
 
 ---
 
+## 0. Where to find a parameter (since 7.7.0)
+
+The dialog no longer lists all ~85 parameters at once. Five groups sit
+behind **Configure...** buttons; the rest stay in the main panel.
+
+| In the main panel | Behind a button |
+|---|---|
+| DEM, contour interval, working size, DPI, output | **Strokes and light** — spacing, width, thresholds, light, and the four 0–1 strengths |
+| View angle and azimuth, vertical exaggeration, local base radius, surface smoothing | **Plains and Hammond classification** — thresholds, modes, stipple *(landform only)* |
+| Relative scene scale and its two settings | **Fill, paper and shading** — fill style, paper preset, opacity, manual range, large-form shading, watercolour |
+| Strip height and memory cap *(classic only)* | **Decoration layers, waters and labels** — every vector input, auto sea, patterns, nodata mode |
+| | **Sheet decoration and print** — frame, ticks, scale bar, compass, hand tremor, print effects |
+
+Next to each button a summary line shows what differs from the defaults.
+Fields that a given algorithm does not have are not shown: the classic
+algorithm has no Hammond classification or plains stipple, the landform
+one has no strip tiling or memory cap.
+
+Batch mode and the graphical modeler are unaffected — there every
+parameter is listed individually, exactly as before, and existing
+Processing presets, models and scripts keep working.
+
+The tables below list every parameter regardless of where it now lives.
+
+---
+
 ## 1. Core relief parameters
 
 | Parameter | Default | Meaning |
@@ -28,6 +54,11 @@ matplotlib, rasterio, shapely, pyproj.
 | Light azimuth / altitude, deg | 315 / 45 | Shared light source: hachure density, hillshade blend and large-form shading all use it. |
 | Base fall-line spacing, px | 4 | Horizontal spacing between strokes before light modulation. |
 | Min slope for a stroke, deg | 4 | Gentler slopes get no hachures. |
+| Break strokes in thalwegs (0–1) | 0.7 | Stops a stroke where flow lines converge closer than the stroke spacing, so strokes from opposite slopes stop fusing into dark blots along the valley floor. 0 = off. |
+| Shorten strokes on gentle ground (0–1) | 0.6 | Scales the descent at which a stroke breaks. Without it a stroke on gentle ground is as long as the bench spacing and reads as a scratch. 0 = off. |
+| Thin out stray strokes (0–1) | 0.4 | Removes strokes whose surroundings describe too few contour levels — a stroke on a single contour depicts no form. 0.4 needs 2 levels, 1.0 needs 4. Resolution-independent. 0 = off. |
+| Cast shadow from the terrain (0–1) | 0.5 | Darkens ground a neighbouring ridge hides from the sun. Diffuse light cannot express this: a ridge shadow falls on lit slopes too. Azimuth/altitude from the light parameters. 0 = off. |
+| Watercolour the fill (0–1) | 0 | Paper grain, a wet edge along colour boundaries, and Kubelka-Munk glazes for land cover and waters. Needs a fill to be enabled; land cover symbols and water patterns are unaffected. |
 | Draw hachures / contour framework | on | The two line systems of the classic look. |
 
 ### Landform algorithm only
@@ -78,8 +109,8 @@ matplotlib, rasterio, shapely, pyproj.
 
 Vector layers, grouped together in the dialog: Rivers (lines), Lakes,
 Seas, Marshes (polygons); land cover polygons — Forest, Sand/dunes,
-Ice/glaciers, Scrub, Grassland/steppe; Roads (lines); Settlements
-(points + polygons) with a label field.
+Ice/glaciers, Scrub, Grassland/steppe; Roads (lines); Thematic line layer
+(lines); Settlements (points + polygons) with a label field.
 
 On paper presets everything is drawn monochrome in ink (the Raisz way);
 over colored fills water turns blue and roads dark red. Rivers pass
@@ -95,6 +126,7 @@ the hachures but below area waters, clipped behind mountains.
 | Settlement label font | Default | Font family for place names: Default, Serif, Sans-serif, Monospace, Cursive, or Fantasy. Generic matplotlib families are used so they resolve on any system. |
 | Settlement label and marker size | 1.0 | Multiplier over the automatic, sheet-relative size. The label scales with the sheet instead of being a fixed point value, so place names no longer shrink on large DEMs; the marker, its offset and halo scale with it. Range 0.2–5.0. |
 | Hydrography patterns | off | Coastal vignette along true shores, hatching in lakes, tuft symbols in marshes. Polygon holes are honoured: islands keep their own shore band, and hatching stays off them. |
+| Styling from layer styles | off | Colour of area waters and land cover taken from those layers' own QGIS styles instead of the theme (first symbol of the renderer). Patterns and textures are kept; only the colour changes. A layer without a colour keeps the theme default. The thematic line layer always uses its style regardless of this box. |
 
 ---
 
