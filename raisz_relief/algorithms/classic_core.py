@@ -1,0 +1,430 @@
+# -*- coding: utf-8 -*-
+# This file is part of <Raisz Relief Plugin>.
+#
+# Copyright (C) 2026 <Maksim Boiko>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+classic_core -- the CLASSIC render core (Alpha & Winter 1971; Raisz 1931;
+Ridd 1963).
+
+Full DEM resolution, uniform physiographic hachuring over the whole
+surface (no Hammond classification, no stippled plains) -- the original
+engraved look. The floating horizon is vectorized (unlike the legacy
+double-loop version). Decoration (fill/waters/roads/settlements, clipping,
+draping) comes from the shared v4 modules.
+
+Memory is not limited by resampling here -- the estimate and the limit
+are handled by the calling algorithm.
+"""
+
+from __future__ import annotations
+
+import os
+import numpy as np
+from scipy import ndimage
+
+from . import grid as gridmod
+from . import fills, theme, compose
+from .physio_core import floating_horizon, _wc_aff
+
+
+def render_classic(
+        dem_path, out_png, grid=None,
+        interval=40.0, view_angle=40.0, vert_exag=2.2, base_scale_px=55,
+        light_az=315.0, light_alt=45.0,
+        fall_spacing=4.0, shadow_density=0.8, light_skip=0.75, min_slope_deg=4.0,
+        valley_break=0.7, flat_short=0.6, lonely=0.4, cast_shadow=0.5,
+        watercolor=0.0,
+        draw_framework=True, draw_fall=True,
+        overlays=None, fill_mode="none", palette="patterson", hypso_shade=0.35,
+        override_min=None, override_max=None, stretch=False, fill_alpha=0.85,
+        water_patterns=False,
+        view_rot=0,
+        auto_sea=False, sea_level=0.0, ink="#2a1d10", hand_jitter=0.0,
+        sheet=None, bulk_shade=0.0, bulk_win=120, anag=0.0, anag_spacing=6,
+        rel_scale=False, rel_target=12.0, rel_levels=12,
+        nodata_mode="plain", settle_font=None, settle_font_scale=1.0,
+        dpi=150, bg="#f4ecd6", progress=None):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+
+    overlays = overlays or {}
+
+    def tick(p, m):
+        if progress:
+            progress(p, m)
+
+    tick(2, "Reading DEM (full resolution)...")
+    if grid is None:
+        grid = gridmod.working_grid(dem_path, max_px=None)
+    z, px, py, valid = gridmod.read_dem(dem_path, grid, nodata_mode, sea_level)
+    geff = grid.geff
+    if view_rot:
+        z, geff = gridmod.rotate_view(z, geff, view_rot)
+        valid = np.rot90(valid, int(view_rot) % 4)
+        if view_rot % 2 == 1:
+            px, py = py, px
+    rows, cols = z.shape
+    if not valid.all():
+        tick(4, "No data: %.1f%% of the frame, mode '%s'"
+             % (100.0 * (~valid).mean(), nodata_mode))
+        _nr = gridmod.nodata_polygons(valid, geff)
+        if _nr:
+            overlays = dict(overlays)
+            # the nodata border is the same survey cut as the sheet frame:
+            # no coastal band along it
+            overlays["nodata_edges"] = _nr
+            if nodata_mode == "sea":
+                overlays["sea_auto"] = list(overlays.get("sea_auto", [])) + _nr
+    if auto_sea:
+        _srings = gridmod.sea_polygons(z, geff, sea_level)
+        if _srings:
+            overlays = dict(overlays)
+            overlays["sea_auto"] = list(overlays.get("sea_auto", [])) + _srings
+
+    tick(12, "Local basis and morphometry...")
+    base = ndimage.grey_opening(z, size=(base_scale_px, base_scale_px))
+    base = ndimage.gaussian_filter(base, sigma=base_scale_px / 3.0)
+    base = np.minimum(base, z)
+    relief = np.clip(z - base, 0, None)
+
+    shear = vert_exag / np.tan(np.radians(view_angle))
+    # Relative mode (v7.3): amplify the RELIEF ITSELF, not just the final
+    # displacement. zg = base + relief*lift is the geometry the slopes,
+    # light, contours and stroke length are computed from. The old disp*=k
+    # stretched a finished gentle drawing; now the engine draws the scene
+    # as a mountain. disp from relief*lift matches the old disp*=k (disp is
+    # linear in relief). The hypsometric fill is coloured by the REAL z.
+    if rel_scale:
+        disp0 = relief * shear / py
+        # selector: lift sharp small forms (scarps, coastal cliffs), not
+        # plains, broad gentle hills or pixel DEM noise
+        w = gridmod.steep_weight(z, px, py, base_scale_px=base_scale_px,
+                                 log=lambda m: tick(13, m))
+        # normalise the target over the STEEP population (w>=0.5) so small
+        # sharp objects reach it; fall back to all relief if too few steep
+        sel = np.where(w >= 0.5, disp0, 0.0)
+        if int((sel > 1e-9).sum()) < 64:
+            sel = disp0
+        k_amp = gridmod.rel_scale_k(sel, rows, rel_target, vert_exag,
+                                    log=lambda m: tick(13, m))
+        lift = 1.0 + (k_amp - 1.0) * w             # non-uniform lift
+        relief_g = relief * lift
+        zg = base + relief_g                       # amplified ("mountain") scene
+        interval = gridmod.rel_interval_local(relief_g, rel_levels,
+                                              log=lambda m: tick(13, m))
+    else:
+        zg = z
+        relief_g = relief
+    disp = relief_g * shear / py
+
+    gyr, gxr = np.gradient(zg, py, px)
+    dzdN = -gyr; dzdE = gxr
+    slope = np.degrees(np.arctan(np.hypot(dzdE, dzdN)))
+    if rel_scale:
+        # stroke width/threshold normalised by percentiles of the amplified
+        # scene -- rel_slope_norm folded into rel_scale; also the rail
+        # against solid black at large k (p95 slope -> max width)
+        min_slope_eff, slope_norm_deg = gridmod.rel_slope_norm(
+            slope, log=lambda m: tick(14, m))
+    else:
+        slope_norm_deg, min_slope_eff = 45.0, min_slope_deg
+    slope_n = np.clip(slope / slope_norm_deg, 0, 1)
+    az, alt = np.radians(light_az), np.radians(light_alt)
+    # Flow convergence (7.4.0): breaks the stroke at the thalweg and damps
+    # the shade-driven build-up there -- see grid.flow_convergence
+    conv_thr = gridmod.convergence_threshold(fall_spacing, px, py, valley_break)
+    if np.isfinite(conv_thr):
+        conv = gridmod.flow_convergence(dzdE, dzdN, px, py)
+        tick(15, "Flow convergence: threshold %.4g 1/m (radius %.0f m)"
+             % (conv_thr, 1.0 / conv_thr))
+    else:
+        conv = None
+    lx, ly, lz = np.sin(az) * np.cos(alt), np.cos(az) * np.cos(alt), np.sin(alt)
+    nrm = np.sqrt(dzdE ** 2 + dzdN ** 2 + 1)
+    illum = (-dzdE * lx - dzdN * ly + lz) / nrm
+    darkness = np.clip(0.5 - 0.5 * illum, 0, 1)
+    gridmod.scene_report(zg, slope, px, py, interval, min_slope_eff,
+                         lambda m: tick(16, m))
+    if cast_shadow > 0.0:
+        # a shadow falls on a lit slope too when a neighbouring ridge blocks
+        # it: illum answers "how is the slope turned towards the sun", this
+        # mask answers "does light reach it". Mixed into darkness BEFORE the
+        # damping in concavities, otherwise thalwegs pick the blot back up.
+        _cast = gridmod.cast_shadow(zg, px, py, light_az, light_alt)
+        darkness = np.clip(darkness + cast_shadow * 0.6 * _cast, 0, 1)
+        tick(18, "Cast shadow: %.0f%% of the area (azimuth %.0f deg, "
+             "altitude %.0f deg)" % (100.0 * float((_cast > 0.5).mean()),
+                                     light_az, light_alt))
+        del _cast
+
+    tick(30, "Hidden-line removal (floating horizon)...")
+    vis = floating_horizon(disp, rows)
+    if nodata_mode == "paper":
+        # 'paper' mode: no strokes, no framework, no decoration outside
+        # the data -- vis gates everything that is clipped by visibility
+        vis = vis & valid
+
+    def smp(a, r, c):
+        return ndimage.map_coordinates(
+            a, [np.atleast_1d(r), np.atleast_1d(c)], order=1, mode="nearest")
+
+    def vis_at(r, c):
+        rr = np.clip(np.round(r).astype(int), 0, rows - 1)
+        cc = np.clip(np.round(c).astype(int), 0, cols - 1)
+        return vis[rr, cc]
+
+    def displace_clip(c_idx, r_idx):
+        r_new = r_idx - smp(disp, r_idx, c_idx)
+        vv = vis_at(r_idx, c_idx)
+        # Contiguous visible runs as ONE polyline, not point pairs. One pair
+        # per edge produced dozens of standalone paths per stroke; Agg copes,
+        # but vector backends pay a fixed cost per PATH -- which is why PDF
+        # took 2.4x longer than PNG on identical geometry. A polyline also
+        # joins properly, without butt caps showing at every bend.
+        out = []
+        d = np.diff(np.concatenate(([0], vv.astype(np.int8), [0])))
+        for a, b in zip(np.flatnonzero(d == 1), np.flatnonzero(d == -1)):
+            if b - a >= 2:
+                out.append(np.column_stack((c_idx[a:b], r_new[a:b])))
+        return out
+
+    fig, ax = plt.subplots(figsize=(cols / 90, rows / 90), dpi=dpi)
+    fig.patch.set_facecolor(bg); ax.set_facecolor(bg)
+
+    tick(42, "Relief fill...")
+    img, extent = fills.build_base_fill(
+        fill_mode, z, disp, illum, grid, palette=palette, shade=hypso_shade,
+        override_min=override_min, override_max=override_max, stretch=stretch,
+        thematic_polys=overlays.get("thematic"), alpha=fill_alpha,
+        geff_rot=(geff if view_rot else None),
+        bulk_shade=bulk_shade, bulk_win=bulk_win, light_az=light_az, ink=ink,
+        valid=(valid if nodata_mode == "paper" else None),
+        watercolor=watercolor,
+        wc_masks=(fills.build_cover_masks(
+            overlays, grid,
+            affine=(_wc_aff(geff) if view_rot else None),
+            out_shape=(z.shape if view_rot else None))
+            if watercolor > 0.0 else None),
+        wc_log=(lambda m: tick(50, m)) if watercolor > 0.0 else None)
+    compose.blit_fill(ax, img, extent, z=1,
+                      smooth=(watercolor <= 0.0))
+    if anag > 0.0:
+        from . import engrave
+        engrave.draw_anaglypt(ax, disp, illum, ink,
+                              spacing=anag_spacing, density=anag, z=1.8)
+    styles = theme.resolve(theme.background_of(fill_mode), paper=bg, ink=ink)
+    styles = theme.apply_style_overrides(styles, overlays.get("style_colors"))
+    from . import sheet as sheetmod
+    styles = sheetmod.apply_settle_style(styles, rows, cols,
+                                         settle_font, settle_font_scale)
+    ink_rgb = theme._hexrgb(ink)           # stroke color (paper presets)
+    _mpp = (px + py) / 2.0                 # physical pixel size (rotation-invariant)
+    pat = (dict(enable=True, vignette_step=6 * _mpp, vignette_n=3,
+                hatch_spacing=7 * _mpp, marsh_spacing=14 * _mpp,
+                extent=grid.extent)
+           if water_patterns else None)
+    hidden = compose.hidden_geometry(vis, geff, log=lambda m: tick(46, m))
+    if watercolor > 0.0:
+        # Watercolour layer for the waters: below the shoreline stroke
+        # (z0=6) but above the hachuring. Water fill does not pass through
+        # build_base_fill -- it is drawn as polygons on top -- so it is
+        # watercolourised separately.
+        _wimg, _wext = fills.build_water_fill(
+            overlays, styles, grid, disp,
+            affine=(_wc_aff(geff) if view_rot else None),
+            out_shape=(z.shape if view_rot else None),
+            strength=watercolor, log=lambda m: tick(60, m))
+        if _wimg is not None:
+            compose.blit_fill(ax, _wimg, _wext, z=5.9, smooth=False)
+    n_area = compose.draw_area_waters(
+        ax, overlays, geff, disp, styles, z0=6, pat=pat, vis=vis,
+        hidden=hidden, faces=(watercolor <= 0.0))
+    lcpat = dict(forest=7 * _mpp, sand=5 * _mpp, ice=6 * _mpp,
+                 scrub=11 * _mpp, grass=9 * _mpp)
+    compose.draw_landcover(ax, overlays, geff, disp, styles, lcpat,
+                           z0=4.5, vis=vis)
+
+    tick(48, "Contours (framework)...")
+    levels = np.arange(np.floor(zg.min() / interval) * interval,
+                       zg.max() + interval, interval)
+    cs = ax.contour(np.arange(cols), np.arange(rows), zg, levels=levels)
+    contour_paths = [seg for segs in cs.allsegs for seg in segs if len(seg) >= 2]
+    cs.remove()
+
+    n_frame = 0
+    if draw_framework:
+        tick(55, "Displaced contours...")
+        frame_segs = []
+        for seg in contour_paths:
+            frame_segs += displace_clip(seg[:, 0], seg[:, 1])
+        n_frame = len(frame_segs)
+        ax.add_collection(LineCollection(
+            frame_segs, linewidths=0.35, colors=[(*ink_rgb, 0.45)],
+            zorder=4))
+
+    max_steps = int(np.clip(interval / max(np.tan(np.radians(
+        max(min_slope_eff, 0.5))) * ((px + py) / 2.0), 1e-3), 4, 40))
+
+    def trace_fall(r0, c0, drop):
+        pts = [(r0, c0)]; r, c = r0, c0; z0v = float(smp(zg, r0, c0)[0])
+        for _ in range(max_steps):
+            gE = float(smp(dzdE, r, c)[0]); gN = float(smp(dzdN, r, c)[0])
+            dr, dc = +gN, -gE; n = np.hypot(dr, dc)
+            if n < 1e-6:
+                break
+            r += dr / n * 1.2; c += dc / n * 1.2
+            if not (0 <= r < rows and 0 <= c < cols):
+                break
+            pts.append((r, c))
+            # flow lines have converged closer than the stroke spacing --
+            # further on the strokes from both slopes would lie on top of
+            # each other; stop at the foot, as a stroke depicting a slope
+            # should
+            if conv is not None and conv[int(r), int(c)] > conv_thr:
+                break
+            if z0v - float(smp(zg, r, c)[0]) >= drop:
+                break
+        return np.array(pts)
+
+    n_fall = 0
+    if draw_fall:
+        tick(65, "Tracing fall lines...")
+        seg_list, lw_list, col_list = [], [], []
+        # seed_list -- seeding points, own_list -- the stroke index for EACH
+        # segment: a stroke splits into a varying number of paths (visibility,
+        # pen pressure), so stray-stroke thinning works through the indices
+        seed_list, own_list, lev_list, bench_list = [], [], [], []
+        jrng2 = np.random.RandomState(99)   # hand jitter (deterministic)
+        for k, seg in enumerate(contour_paths):
+            if progress and k % 50 == 0:
+                tick(65 + int(25 * k / max(len(contour_paths), 1)),
+                     "Tracing fall lines...")
+            c_idx = seg[:, 0]; r_idx = seg[:, 1]
+            dlen = np.r_[0, np.cumsum(np.hypot(np.diff(c_idx), np.diff(r_idx)))]
+            s = 0.0
+            while s < dlen[-1]:
+                ci = float(np.interp(s, dlen, c_idx))
+                ri = float(np.interp(s, dlen, r_idx))
+                dk = float(smp(darkness, [ri], [ci])[0])
+                sl = float(smp(slope_n, [ri], [ci])[0])
+                il = float(smp(illum, [ri], [ci])[0])
+                # A thalweg is shaded and concave AT THE SAME TIME, so the
+                # three darkness-driven modulations -- denser seeding, extra
+                # width and higher opacity -- used to pile up into one blot
+                # there. In a convergence zone the shade term is damped: the
+                # blot is not built from converging paths alone.
+                cv = 0.0
+                if conv is not None:
+                    cv = float(np.clip(
+                        conv[int(ri), int(ci)] / conv_thr, 0.0, 1.0))
+                dk_eff = dk * (1.0 - 0.7 * cv)
+                s += max(fall_spacing * (1.0 - shadow_density * 0.7 * dk_eff) *
+                         (1.0 - 0.3 * sl), fall_spacing * 0.25)
+                if sl * slope_norm_deg < min_slope_eff or il > light_skip:
+                    continue
+                if cv >= 1.0:      # seed inside the convergence funnel
+                    continue
+                fall = trace_fall(
+                    ri, ci, interval * gridmod.drop_fraction(sl, flat_short))
+                if len(fall) < 2:
+                    continue
+                segs = displace_clip(fall[:, 1], fall[:, 0])
+                if not segs:
+                    continue
+                seed_list.append((ci, ri))
+                lev_list.append(int(round(
+                    float(smp(zg, [ri], [ci])[0]) / interval)))
+                bench_list.append(gridmod.bench_spacing_px(
+                    sl * slope_norm_deg, interval, (px + py) / 2.0))
+                Wc = 0.3 + 1.6 * sl * (0.3 + 0.7 * dk_eff)
+                a = min(0.45 + 0.5 * dk_eff, 0.95)
+                if hand_jitter > 0:
+                    # pen pressure: the width varies ALONG the stroke, while
+                    # a path has a single width -- so polylines fall to edges
+                    pairs = [p[i:i + 2] for p in segs
+                             for i in range(len(p) - 1)]
+                    M = len(pairs)
+                    tt = np.linspace(0.0, 1.0, M)
+                    prof = 1.0 - hand_jitter * 0.55 * (1.0 - np.sin(np.pi * tt))
+                    prof *= 1.0 + hand_jitter * 0.3 * (jrng2.rand(M) - 0.5) * 2.0
+                    seg_list.extend(pairs)
+                    lw_list.extend(np.clip(Wc * prof, 0.05, None).tolist())
+                    col_list.extend([(*ink_rgb, a)] * M)
+                    own_list.extend([len(seed_list) - 1] * M)
+                else:
+                    # width is constant along the stroke -- one polyline
+                    seg_list.extend(segs)
+                    lw_list.extend([Wc] * len(segs))
+                    col_list.extend([(*ink_rgb, a)] * len(segs))
+                    own_list.extend([len(seed_list) - 1] * len(segs))
+        if seg_list and lonely > 0.0:
+            keep = gridmod.sparse_levels_mask(
+                seed_list, lev_list, bench_list, lonely,
+                log=lambda m: tick(90, m))
+            if not keep.all():
+                _m = keep[np.asarray(own_list)]
+                seg_list = [s for s, f in zip(seg_list, _m) if f]
+                lw_list = [w for w, f in zip(lw_list, _m) if f]
+                col_list = [c for c, f in zip(col_list, _m) if f]
+        if seg_list:
+            n_fall = len(seg_list)
+            ax.add_collection(LineCollection(
+                seg_list, linewidths=lw_list, colors=col_list,
+                capstyle="round", zorder=5))
+
+    n_inf = compose.draw_infrastructure(ax, overlays, geff, disp, styles,
+                                        vis=vis, z0=7)
+    compose.draw_thematic_lines(ax, overlays, geff, disp, vis=vis)
+
+    tick(94, "Saving output...")
+    disp_max = float(disp.max())
+    # silhouette: per-column minimum screen Y -- breaks the top frame line
+    top_profile = (np.arange(rows)[:, None] - disp).min(axis=0)
+    margin = 0.04 * max(rows, cols)
+    n_sheet = {}
+    if sheet:
+        from . import sheet as sheetmod
+        n_sheet = sheetmod.draw_sheet(
+            ax, geff, grid.proj, rows, cols, margin, bg, ink, sheet,
+            top_pad=disp_max,
+            extras=dict(styles=styles, overlays=overlays,
+                        fall=draw_fall, stipple=False, auto_sea=auto_sea),
+            log=lambda m: tick(93, m), top_profile=top_profile)
+    ax.set_xlim(-margin, cols + margin)
+    ax.set_ylim(rows + margin, -disp_max - margin)
+    ax.set_aspect("equal"); ax.axis("off")
+    plt.subplots_adjust(0, 0, 1, 1)
+    os.makedirs(os.path.dirname(out_png) or ".", exist_ok=True)
+    _ext = os.path.splitext(out_png)[1].lower()
+    if _ext in (".pdf", ".svg", ".eps"):
+        tick(96, "Writing %s: %d stroke paths, %d framework -- this may take "
+                 "minutes..." % (_ext.lstrip(".").upper(), n_fall, n_frame))
+    else:
+        tick(96, "Writing PNG...")
+    plt.savefig(out_png, dpi=dpi, facecolor=fig.get_facecolor(),
+                bbox_inches="tight", pad_inches=0.12)
+    plt.close(fig)
+    if sheet and sheet.get("misreg", 0) > 0:
+        from . import print_fx
+        print_fx.misregister(out_png, sheet["misreg"],
+                             log=lambda m: tick(99, m))
+    tick(100, "Done.")
+    stats = dict(rows=rows, cols=cols, levels=len(levels),
+                 frame_segs=n_frame, fall_segs=n_fall, max_disp_px=disp_max)
+    stats.update(n_area); stats.update(n_inf); stats.update(n_sheet)
+    return stats
