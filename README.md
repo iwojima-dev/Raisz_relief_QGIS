@@ -19,6 +19,8 @@ in proportion to its height, and fall lines with light-dependent density
 and hidden-surface removal build the oblique view. The higher the
 mountain, the taller its profile.
 
+![Norge fjords](images/fjord_sepia.png)
+
 Two algorithms share one decoration layer:
 
 * **Landform map (Hammond + Mower + Alpha)** — hybrid: Hammond
@@ -54,6 +56,8 @@ Two algorithms share one decoration layer:
 - Grouped parameter dialogs: the bulk of the settings sit behind five
   **Configure...** buttons, with the per-DEM ones left in the main panel
 - Vector export to SVG/PDF
+
+![Fuji](images/fuji_clear_paterson_2500px.png)
 
 ## Installation
 
@@ -191,6 +195,9 @@ the authentic panoramic-map effect, not a bug.
 - Most settings live behind the five **Configure...** buttons; the
   summary line next to each shows what you have changed from the
   defaults.
+
+![Galcier](images/glacier_anaglypt_2500px.png)
+
 
 ### Vector output
 
