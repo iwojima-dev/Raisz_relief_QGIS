@@ -11,6 +11,8 @@ ready for print or for editing in vector software.
 
 ---
 
+![Norge fjords](images/fjord_sepia.png)
+
 ## What it does
 
 The method follows Alpha & Winter (1971), Raisz (1931) and Ridd (1963):
@@ -62,6 +64,8 @@ Two algorithms share one decoration layer:
   shield volcanoes, the 7.3 look — plus your own, saved by name
 - English and Russian interface, following the QGIS language
 - Vector export to SVG/PDF
+
+![Fuji region](images/fuji_clear_paterson_2500px.png)
 
 ## Installation
 
@@ -265,6 +269,8 @@ Choose `.svg` or `.pdf` in the output file dialog. Line work exports as
 true vectors; fills, dot screen and paper grain are embedded as raster
 underlays, so files grow. Color misregistration is PNG-only and is
 skipped for vector formats.
+
+![Glacier in anaglypt](images/glacier_anaglypt_2500px.png)
 
 ---
 
