@@ -1,13 +1,13 @@
 # Raisz-style Relief
 
-A QGIS Processing plugin that turns a DEM into presentation-quality
-physiographic relief graphics in the manner of **Erwin Raisz** — oblique
-hachured mountains, stippled plains, engraved waters and a decorated map
-sheet. The output is a *picture*, not a georeferenced raster: PNG, SVG or
-PDF ready for print or for editing in vector software.
+A QGIS plugin that turns a DEM into presentation-quality physiographic
+relief graphics in the manner of **Erwin Raisz** — oblique hachured
+mountains, stippled plains, engraved waters and a decorated map sheet.
+The output is a *picture*, not a georeferenced raster: PNG, SVG or PDF
+ready for print or for editing in vector software.
 
 ![License](https://img.shields.io/badge/license-GPLv3-blue)
-![QGIS](https://img.shields.io/badge/QGIS-3.28%2B-green)
+![QGIS](https://img.shields.io/badge/QGIS-3.40%2B-green)
 
 ---
 
@@ -18,8 +18,6 @@ contour levels are made invisible, every relief point is displaced north
 in proportion to its height, and fall lines with light-dependent density
 and hidden-surface removal build the oblique view. The higher the
 mountain, the taller its profile.
-
-![Norge fjords](images/fjord_sepia.png)
 
 Two algorithms share one decoration layer:
 
@@ -53,11 +51,17 @@ Two algorithms share one decoration layer:
   pointing to true north
 - Old-print emulation: halftone dot screen, paper grain, color misregistration
 - Canvas rotation 0/90/180/270°, relative scene scaling for gentle terrain
-- Grouped parameter dialogs: the bulk of the settings sit behind five
-  **Configure...** buttons, with the per-DEM ones left in the main panel
+- Its own tabbed window for each algorithm, with background runs, a
+  progress bar, a log and remembered settings; the Processing Toolbox
+  keeps the full parameter list for batch runs and models
+- Fields the current settings leave unused are greyed out, with the
+  reason in the tooltip
+- *Analyze DEM* suggests a contour interval and a relief preset before
+  the first render
+- Relief presets — mountains, rocky, low mountains, gentle mountains and
+  shield volcanoes, the 7.3 look — plus your own, saved by name
+- English and Russian interface, following the QGIS language
 - Vector export to SVG/PDF
-
-![Fuji](images/fuji_clear_paterson_2500px.png)
 
 ## Installation
 
@@ -72,8 +76,35 @@ directory and enable it in *Plugins → Manage and Install Plugins*:
 | Linux | `~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/` |
 | macOS | `~/Library/Application Support/QGIS/QGIS3/profiles/default/python/plugins/` |
 
-The algorithms then appear in the Processing Toolbox under
-**Raisz-style Relief**.
+When updating manually, replace the whole folder rather than copying
+over it, so files removed in a newer version do not linger.
+
+### Where to find it
+
+- **Toolbar** — two buttons, *Landform map* and *Classic physiographic*.
+- **Raster menu → Raisz-style Relief** — the same two entries.
+- **Processing Toolbox → Raisz-style Relief** — both algorithms with the
+  full flat parameter list, for batch mode, the graphical modeler and
+  scripts.
+
+The buttons and the menu open the plugin's own window: parameters sorted
+into tabs (main settings and scene view, strokes and light, plains,
+fill and paper, layers, sheet and print), help on the right, and a log
+at the bottom. *Run* renders in the background, so QGIS stays usable;
+*Cancel* stops the run. Values are remembered between sessions.
+*Open in Processing…* hands the current values to the standard
+Processing dialog.
+
+Fields that the current settings do not use are greyed out — hover one
+to see why. They keep their values and come back as soon as the setting
+they depend on changes.
+
+### Language
+
+The plugin follows the QGIS interface language (*Settings → Options →
+General*). Russian is included; any other language shows English.
+Parameter ids do not change with the language, so models and scripts
+work in either.
 
 ### Requirements
 
@@ -91,7 +122,9 @@ Lambert Conformal Conic for a country-sized sheet. The method measures
 local relief and slopes in meters, so a geographic CRS (EPSG:4326,
 degrees) distorts them badly: one degree of longitude is not one degree
 of latitude anywhere except the equator, and the hachures come out
-stretched. The landform algorithm warns you when the DEM is in degrees.
+stretched. A DEM in degrees still renders — the pixel size is converted
+to metres at the centre latitude — but both algorithms warn about it, and
+the result is only as good as that approximation.
 
 Reproject the DEM first (*Raster → Projections → Warp*), don't rely on
 on-the-fly reprojection — the plugin reads the file, not the canvas.
@@ -163,6 +196,35 @@ noise stay low.
 > **Warning:** relative scene scale is experimental. It is aimed at
 > small, large-scale scenes and can produce unpredictable results.
 
+### Relief presets
+
+The stroke settings that suit the Himalaya do not suit a shield volcano.
+Pick a preset in the row above the tabs and press **Apply**:
+
+| Preset | For |
+|---|---|
+| Mountains | high, steep relief (the defaults) |
+| As in 7.3 | strokes at full length, no stroke clean-up |
+| Rocky, dissected | domes, cliffs and gullies over lowland |
+| Low mountains | ranges up to ~2 km over rolling land |
+| Gentle mountains, shield volcanoes | large forms at 3–10° |
+
+A preset only fills the stroke and relief fields — the DEM, output,
+layers, fill and sheet are left alone — and every field stays editable.
+Choose the DEM first: the local basis is set in metres on the ground and
+the contour interval from the DEM, so the preset fits its resolution.
+*Save as…* keeps your own combination. *Analyze DEM* names the preset
+that fits the scene.
+
+### Contour interval
+
+Press **Analyze DEM** in the plugin window before the first render. It
+reads the DEM quickly and suggests an interval that puts neighbouring
+contours about 5 px apart on the ground steep enough to be hachured;
+below ~3 px they merge, above ~20 px the strokes turn long and sparse.
+The suggestion depends on the working resolution, so analyze again after
+changing it.
+
 ### Vertical exaggeration and view
 
 Start at 2.0–2.5 in absolute mode. Higher values look dramatic but
@@ -182,6 +244,10 @@ the authentic panoramic-map effect, not a bug.
   and compass. Everything is off by default so you can judge each addition.
 - Hydrography patterns and land cover textures are expensive on huge
   polygon sets; test on a small extent first.
+- **Stroke weight from the scene's slopes** helps gentle relief: the
+  full stroke weight is reached at the steepest slopes of the scene
+  rather than at 45°, so shield volcanoes and plateaus get tone. Mountain
+  scenes are unaffected.
 - **Watercolour** is off by default and needs a fill to be enabled. It
   adds paper grain and a wet edge; at full strength it competes with the
   hachuring for attention, so 0.3–0.6 usually reads better on a dense
@@ -192,12 +258,6 @@ the authentic panoramic-map effect, not a bug.
 - **Anaglyptography** works best either *instead of* fall lines (disable
   hachures, keep the framework) or *under* them with small spacing and
   low intensity.
-- Most settings live behind the five **Configure...** buttons; the
-  summary line next to each shows what you have changed from the
-  defaults.
-
-![Galcier](images/glacier_anaglypt_2500px.png)
-
 
 ### Vector output
 
